@@ -236,7 +236,7 @@ const ref = useForwardedRef()
 
 ```ts
 const props = defineProps<{
-  __forwarded_ref__?: Ref<any>
+  __forwarded_ref__?: ForwardedRef<any>
 }>()
 
 const ref = props.__forwarded_ref__

@@ -38,7 +38,7 @@ interface DefinePropsCall {
 interface ScriptScope {
   bindings: Set<string>;
   forwardedRefLocals: Set<string>;
-  hasVueRefType: boolean;
+  forwardedRefTypeIdentifier: string | null;
   removableForwardedRefImports: ImportDeclaration[];
   removableForwardedRefSpecifiers: Array<{
     declaration: ImportDeclaration;
@@ -76,14 +76,19 @@ export function transformScriptSetup(
   const defineProps = collectDefineProps(ast)[0] ?? null;
   const defineExpose = collectDefineExpose(ast)[0] ?? null;
   const propsIdentifier = defineProps?.propsIdentifier ?? choosePropsIdentifier(scope.bindings);
-  const refType = buildRefType(bindings);
+  const forwardedRefTypeIdentifier =
+    scope.forwardedRefTypeIdentifier ?? chooseForwardedRefTypeIdentifier(scope.bindings);
+  const refType = buildRefType(bindings, forwardedRefTypeIdentifier);
   const propShape = `{ ${FORWARDED_REF_PROP_NAME}?: ${refType} | ((value: any) => void) }`;
   const exposedProperties = bindings.flatMap((binding) => binding.exposeProperties);
 
   removeForwardedRefImports(s, options.offset, scope);
 
-  if (!scope.hasVueRefType) {
-    s.prependLeft(options.offset, `import type { Ref } from "vue"\n`);
+  if (!scope.forwardedRefTypeIdentifier) {
+    s.prependLeft(
+      options.offset,
+      `\nimport type { ForwardedRef${forwardedRefTypeIdentifier === "ForwardedRef" ? "" : ` as ${forwardedRefTypeIdentifier}`} } from "vue-refx"\n`,
+    );
   }
 
   const insertionPoint = Math.min(...bindings.map((binding) => binding.statementStart));
@@ -209,7 +214,7 @@ function collectDefineExpose(ast: File): DefineExposeCall[] {
 function collectScriptScope(ast: File): ScriptScope {
   const bindings = new Set<string>();
   const forwardedRefLocals = new Set<string>();
-  let hasVueRefType = false;
+  let forwardedRefTypeIdentifier: string | null = null;
   const removableForwardedRefImports: ImportDeclaration[] = [];
   const removableForwardedRefSpecifiers: ScriptScope["removableForwardedRefSpecifiers"] = [];
 
@@ -217,13 +222,24 @@ function collectScriptScope(ast: File): ScriptScope {
     Program(path) {
       Object.keys(path.scope.bindings).forEach((name) => bindings.add(name));
     },
+    TSInterfaceDeclaration(path) {
+      bindings.add(path.node.id.name);
+    },
+    TSTypeAliasDeclaration(path) {
+      bindings.add(path.node.id.name);
+    },
     ImportDeclaration(path) {
       const node = path.node;
 
-      if (node.source.value === "vue") {
+      if (isForwardedRefImportSource(node.source.value)) {
         for (const specifier of node.specifiers) {
-          if (specifier.local.type === "Identifier" && specifier.local.name === "Ref") {
-            hasVueRefType = true;
+          if (
+            specifier.type === "ImportSpecifier" &&
+            specifier.imported.type === "Identifier" &&
+            specifier.imported.name === "ForwardedRef" &&
+            specifier.local.type === "Identifier"
+          ) {
+            forwardedRefTypeIdentifier = specifier.local.name;
           }
         }
       }
@@ -266,7 +282,7 @@ function collectScriptScope(ast: File): ScriptScope {
   return {
     bindings,
     forwardedRefLocals,
-    hasVueRefType,
+    forwardedRefTypeIdentifier,
     removableForwardedRefImports,
     removableForwardedRefSpecifiers,
   };
@@ -453,15 +469,30 @@ function getFactoryObjectExpression(
   return null;
 }
 
-function buildRefType(bindings: ForwardedRefBinding[]): string {
+function buildRefType(bindings: ForwardedRefBinding[], forwardedRefTypeIdentifier: string): string {
   const typeSources = [...new Set(bindings.map((binding) => binding.typeSource).filter(Boolean))];
 
   if (typeSources.length === 0) {
-    return "Ref<any>";
+    return `${forwardedRefTypeIdentifier}<any>`;
   }
 
-  const nullable = typeSources.map((type) => `${type} | null`).join(" | ");
-  return `Ref<${nullable}>`;
+  return typeSources.map((type) => `${forwardedRefTypeIdentifier}<${type}>`).join(" | ");
+}
+
+function chooseForwardedRefTypeIdentifier(bindings: Set<string>): string {
+  if (!bindings.has("ForwardedRef")) {
+    return "ForwardedRef";
+  }
+
+  let index = 1;
+  let candidate = "__ForwardedRef";
+
+  while (bindings.has(candidate)) {
+    candidate = `__ForwardedRef${index}`;
+    index += 1;
+  }
+
+  return candidate;
 }
 
 function choosePropsIdentifier(bindings: Set<string>): string {

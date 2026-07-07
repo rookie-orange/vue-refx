@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import type { ShallowUnwrapRef, VNodeRef } from "vue";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { ForwardedRef } from "../packages/runtime/src";
 import { analyzeVueSfc, getVueComponentImports, transformVueSfc } from "../packages/core/src";
 
 describe("script setup forwarded ref transform", () => {
@@ -13,13 +15,13 @@ const ref = useForwardedRef<HTMLInputElement>()
 
     expect(result.hasChanged).toBe(true);
     expect(result.hasUseForwardedRef).toBe(true);
-    expect(result.code).toContain(`import type { Ref } from "vue"`);
+    expect(result.code).toContain(`import type { ForwardedRef } from "vue-refx"`);
     expect(result.code).toContain(
-      `const props = defineProps<{ __forwarded_ref__?: Ref<HTMLInputElement | null> | ((value: any) => void) }>()`,
+      `const props = defineProps<{ __forwarded_ref__?: ForwardedRef<HTMLInputElement> | ((value: any) => void) }>()`,
     );
     expect(result.code).toContain(`const ref = props.__forwarded_ref__`);
     expect(result.code).not.toContain("useForwardedRef<HTMLInputElement>()");
-    expect(result.code).not.toContain(`from "vue-refx"`);
+    expect(result.code).not.toContain(`import { useForwardedRef } from "vue-refx"`);
   });
 
   it("does not transform useForwardedRef without an import", () => {
@@ -46,7 +48,7 @@ const inputRef = useForwardedRef()
 `);
 
     expect(result.code).toContain(
-      `defineProps<Props & { __forwarded_ref__?: Ref<any> | ((value: any) => void) }>()`,
+      `defineProps<Props & { __forwarded_ref__?: ForwardedRef<any> | ((value: any) => void) }>()`,
     );
     expect(result.code).toContain(`const inputRef = props.__forwarded_ref__`);
     expect((result.code.match(/defineProps/g) ?? []).length).toBe(1);
@@ -62,7 +64,7 @@ const inputRef = useForwardedRef<HTMLDivElement>()
 `);
 
     expect(result.code).toContain(`const inputRef = props.__forwarded_ref__`);
-    expect(result.code).toContain(`Ref<HTMLDivElement | null>`);
+    expect(result.code).toContain(`ForwardedRef<HTMLDivElement>`);
   });
 
   it("recognizes import aliases", () => {
@@ -75,8 +77,30 @@ const inputRef = forwarded<HTMLInputElement>()
 `);
 
     expect(result.code).toContain(`const inputRef = props.__forwarded_ref__`);
-    expect(result.code).toContain(`Ref<HTMLInputElement | null>`);
+    expect(result.code).toContain(`ForwardedRef<HTMLInputElement>`);
     expect(result.code).not.toContain("forwarded<HTMLInputElement>()");
+  });
+
+  it("aliases the generated ForwardedRef import when the name is already bound", () => {
+    const result = transformVueSfc(`
+<script setup lang="ts">
+import { useForwardedRef } from "vue-refx"
+
+type ForwardedRef = { local: true }
+const inputRef = useForwardedRef<HTMLInputElement>()
+</script>
+`);
+
+    expect(result.code).toContain(`import type { ForwardedRef as __ForwardedRef } from "vue-refx"`);
+    expect(result.code).toContain(`__ForwardedRef<HTMLInputElement>`);
+  });
+
+  it("keeps forwarded refs assignable to DOM ref bindings after template unwrapping", () => {
+    type TemplateRef = ShallowUnwrapRef<{
+      ref: ForwardedRef<HTMLInputElement> | ((value: any) => void) | undefined;
+    }>["ref"];
+
+    expectTypeOf<TemplateRef>().toMatchTypeOf<VNodeRef | undefined>();
   });
 
   it("creates defineExpose from the factory API", () => {
