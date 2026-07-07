@@ -1,5 +1,7 @@
 # vue-refs
 
+[中文](./README.zh-CN.md) | English
+
 React-style forwarded refs for Vue.
 
 Forward refs through components just like React 19 — without modifying Vue runtime.

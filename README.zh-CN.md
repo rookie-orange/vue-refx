@@ -1,5 +1,7 @@
 # vue-refs
 
+中文 | [English](./README.md)
+
 面向 Vue 的 React 风格 ref 转发。
 
 像 React 19 一样在组件之间转发 ref，无需修改 Vue 运行时。
