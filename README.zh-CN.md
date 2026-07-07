@@ -1,4 +1,4 @@
-# vue-refs
+# vue-refx
 
 中文 | [English](./README.md)
 
@@ -40,19 +40,19 @@ App
 
 在今天的 Vue 中，每一层中间组件都需要手动暴露其内部实例或方法。
 
-使用 **vue-refs** 后，ref 可以自然地穿过组件边界，让深层包裹的组件像原生元素一样工作。
+使用 **vue-refx** 后，ref 可以自然地穿过组件边界，让深层包裹的组件像原生元素一样工作。
 
 ---
 
 ## 安装
 
 ```bash
-pnpm add vue-refs
+pnpm add vue-refx
 ```
 
 ```ts
 import vue from "@vitejs/plugin-vue"
-import VueRefs from "vue-refs/vite"
+import VueRefs from "vue-refx/vite"
 
 export default defineConfig({
   plugins: [vue(), VueRefs()],
@@ -67,7 +67,7 @@ export default defineConfig({
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -124,7 +124,7 @@ MyInput.vue
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -138,7 +138,7 @@ BaseInput.vue
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -152,7 +152,7 @@ InputWrapper.vue
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -176,7 +176,7 @@ const ref = useForwardedRef<HTMLInputElement>()
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const input = ref<HTMLInputElement>()
 
@@ -212,7 +212,7 @@ input.value.blur()
 
 ## 工作原理
 
-vue-refs **只在编译期工作**。
+vue-refx **只在编译期工作**。
 
 编译前：
 
@@ -261,7 +261,7 @@ useForwardedRef(() => ({
 
 ## 对比
 
-| 功能 | Vue `defineExpose()` | vue-refs |
+| 功能 | Vue `defineExpose()` | vue-refx |
 | --- | --- | --- |
 | 暴露组件方法 | ✅ | ✅ |
 | 穿过多个组件转发 ref | ❌ | ✅ |
@@ -279,7 +279,7 @@ useForwardedRef(() => ({
 
 Vue 原生的 `ref` 行为不会改变。
 
-vue-refs 只是将已有的 ref 穿过组件继续向下转发。
+vue-refx 只是将已有的 ref 穿过组件继续向下转发。
 
 ---
 
@@ -287,7 +287,7 @@ vue-refs 只是将已有的 ref 穿过组件继续向下转发。
 
 不会。
 
-vue-refs 完全通过编译器转换实现。
+vue-refx 完全通过编译器转换实现。
 
 ---
 

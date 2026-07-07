@@ -8,7 +8,7 @@
     "@vitejs/plugin-vue": "catalog:",
     "vite": "catalog:",
     "vue": "catalog:",
-    "vue-refs": "workspace:*"
+    "vue-refx": "workspace:*"
   },
   "devDependencies": {
     "typescript": "catalog:"

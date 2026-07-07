@@ -1,4 +1,4 @@
-# vue-refs
+# vue-refx
 
 [中文](./README.zh-CN.md) | English
 
@@ -40,19 +40,19 @@ App
 
 With Vue today, every intermediate component must manually expose its internal instance or methods.
 
-With **vue-refs**, refs can be forwarded naturally through component boundaries, making deeply wrapped components behave like native elements.
+With **vue-refx**, refs can be forwarded naturally through component boundaries, making deeply wrapped components behave like native elements.
 
 ---
 
 ## Installation
 
 ```bash
-pnpm add vue-refs
+pnpm add vue-refx
 ```
 
 ```ts
 import vue from "@vitejs/plugin-vue"
-import VueRefs from "vue-refs/vite"
+import VueRefs from "vue-refx/vite"
 
 export default defineConfig({
   plugins: [vue(), VueRefs()],
@@ -67,7 +67,7 @@ export default defineConfig({
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -124,7 +124,7 @@ MyInput.vue
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -138,7 +138,7 @@ BaseInput.vue
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -152,7 +152,7 @@ InputWrapper.vue
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -176,7 +176,7 @@ Instead, expose a custom API.
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const input = ref<HTMLInputElement>()
 
@@ -212,7 +212,7 @@ This is conceptually similar to React's `useImperativeHandle()`.
 
 ## How it works
 
-vue-refs is **compiler-only**.
+vue-refx is **compiler-only**.
 
 Before compilation:
 
@@ -261,7 +261,7 @@ Nothing is executed at runtime.
 
 ## Comparison
 
-| Feature                                  | Vue `defineExpose()` | vue-refs |
+| Feature                                  | Vue `defineExpose()` | vue-refx |
 | ---------------------------------------- | -------------------- | -------- |
 | Expose component methods                 | ✅                   | ✅       |
 | Forward refs through multiple components | ❌                   | ✅       |
@@ -279,7 +279,7 @@ No.
 
 Vue's native `ref` behavior is unchanged.
 
-vue-refs only forwards existing refs through components.
+vue-refx only forwards existing refs through components.
 
 ---
 
@@ -287,7 +287,7 @@ vue-refs only forwards existing refs through components.
 
 No.
 
-vue-refs is implemented entirely as a compiler transform.
+vue-refx is implemented entirely as a compiler transform.
 
 ---
 

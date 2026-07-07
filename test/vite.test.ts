@@ -26,7 +26,7 @@ describe("vite plugin", () => {
   });
 
   it("injects template ref props only for imported components that use forwarded refs", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vue-refs-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vue-refx-"));
     tempDirs.push(dir);
 
     const child = path.join(dir, "MyInput.vue");
@@ -36,7 +36,7 @@ describe("vite plugin", () => {
     await fs.writeFile(
       child,
       `<script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
@@ -73,13 +73,13 @@ import Plain from "./Plain.vue"
   });
 
   it("returns importer modules during HMR when a forwarded-ref child changes", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vue-refs-hmr-"));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vue-refx-hmr-"));
     tempDirs.push(dir);
 
     const child = path.join(dir, "MyInput.vue");
     const parent = path.join(dir, "Parent.vue");
     const childCode = `<script setup lang="ts">
-import { useForwardedRef } from "vue-refs"
+import { useForwardedRef } from "vue-refx"
 
 const ref = useForwardedRef<HTMLInputElement>()
 </script>
