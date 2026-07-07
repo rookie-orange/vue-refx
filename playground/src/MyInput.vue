@@ -1,5 +1,7 @@
 <script setup lang="ts">
-const ref = useRefProp<HTMLInputElement>()
+import { useForwardedRef } from "vue-forward-ref"
+
+const ref = useForwardedRef<HTMLInputElement>()
 </script>
 
 <template>

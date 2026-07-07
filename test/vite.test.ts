@@ -2,17 +2,29 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { afterEach, describe, expect, it } from "vitest"
-import RefProp from "../packages/vite/src"
+import ForwardRef from "../packages/vite/src"
 
 const tempDirs: string[] = []
+
+interface VitePluginShape {
+  transform?: unknown
+  vite?: {
+    configureServer?: (server: unknown) => void
+    handleHotUpdate?: (ctx: {
+      file: string
+      modules: Array<{ id: string }>
+      read: () => Promise<string>
+    }) => Promise<Array<{ id: string }> | undefined>
+  }
+}
 
 describe("vite plugin", () => {
   afterEach(async () => {
     await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })))
   })
 
-  it("injects template ref props only for imported components that use the macro", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vue-ref-prop-"))
+  it("injects template ref props only for imported components that use forwarded refs", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vue-forward-ref-"))
     tempDirs.push(dir)
 
     const child = path.join(dir, "MyInput.vue")
@@ -22,7 +34,9 @@ describe("vite plugin", () => {
     await fs.writeFile(
       child,
       `<script setup lang="ts">
-const ref = useRefProp<HTMLInputElement>()
+import { useForwardedRef } from "vue-forward-ref"
+
+const ref = useForwardedRef<HTMLInputElement>()
 </script>
 <template><input :ref="ref" /></template>
 `
@@ -41,14 +55,65 @@ import Plain from "./Plain.vue"
 `
     await fs.writeFile(parent, parentCode)
 
-    const pluginOrPlugins = RefProp()
-    const plugin = Array.isArray(pluginOrPlugins) ? pluginOrPlugins[0] : pluginOrPlugins
+    const pluginOrPlugins = ForwardRef()
+    const plugin = (Array.isArray(pluginOrPlugins) ? pluginOrPlugins[0] : pluginOrPlugins) as VitePluginShape
     const transform = plugin.transform
     const result = await callTransform(transform, parentCode, parent)
 
-    expect(result?.code).toContain(`MyInput ref="input"  :__ref_prop__="input"`)
+    expect(result?.code).toContain(
+      `MyInput :__forwarded_ref__="(value) => typeof input === &quot;function&quot; ? input(value) : (input = value)"`
+    )
+    expect(result?.code).not.toContain(`MyInput ref="input"`)
     expect(result?.code).toContain(`<Plain ref="plain" />`)
     expect(result?.code).toContain(`<div ref="el" />`)
+  })
+
+  it("returns importer modules during HMR when a forwarded-ref child changes", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vue-forward-ref-hmr-"))
+    tempDirs.push(dir)
+
+    const child = path.join(dir, "MyInput.vue")
+    const parent = path.join(dir, "Parent.vue")
+    const childCode = `<script setup lang="ts">
+import { useForwardedRef } from "vue-forward-ref"
+
+const ref = useForwardedRef<HTMLInputElement>()
+</script>
+`
+    const parentCode = `<script setup lang="ts">
+import MyInput from "./MyInput.vue"
+</script>
+<template><MyInput ref="input" /></template>
+`
+
+    await fs.writeFile(child, childCode)
+    await fs.writeFile(parent, parentCode)
+
+    const pluginOrPlugins = ForwardRef()
+    const plugin = (Array.isArray(pluginOrPlugins) ? pluginOrPlugins[0] : pluginOrPlugins) as VitePluginShape
+    const modules = new Map<string, { id: string }>()
+    modules.set(parent, { id: parent })
+
+    if (plugin.vite && "configureServer" in plugin.vite && typeof plugin.vite.configureServer === "function") {
+      plugin.vite.configureServer({
+        moduleGraph: {
+          getModuleById(id: string) {
+            return modules.get(id)
+          },
+          invalidateModule() {}
+        }
+      })
+    }
+
+    await callTransform(plugin.transform, parentCode, parent)
+
+    const result = await plugin.vite?.handleHotUpdate?.({
+      file: child,
+      modules: [{ id: child }],
+      read: async () => childCode
+    })
+
+    expect(result?.map((module: { id: string }) => module.id)).toEqual([child, parent])
   })
 })
 

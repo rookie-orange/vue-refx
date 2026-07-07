@@ -1,19 +1,29 @@
-# unplugin-vue-ref-prop
+# vue-forward-ref
 
-Vue compiler macro that forwards a component template ref into the child as a prop during SFC compilation.
+React-style Forwarded Ref for Vue.
+
+Zero Runtime.
+
+Zero Vue Runtime Patch.
+
+Compiler Transform Only.
 
 ```ts
 import vue from "@vitejs/plugin-vue"
-import RefProp from "unplugin-vue-ref-prop/vite"
+import ForwardRef from "vue-forward-ref/vite"
 
 export default defineConfig({
-  plugins: [vue(), RefProp()]
+  plugins: [vue(), ForwardRef()]
 })
 ```
 
+Child component:
+
 ```vue
 <script setup lang="ts">
-const ref = useRefProp<HTMLInputElement>()
+import { useForwardedRef } from "vue-forward-ref"
+
+const ref = useForwardedRef<HTMLInputElement>()
 </script>
 
 <template>
@@ -36,16 +46,20 @@ const input = ref<HTMLInputElement | null>(null)
 </template>
 ```
 
-The macro is erased before Vue compiles the SFC. No Vue runtime patching is used.
+Expose methods from the child ref:
 
-## Types
+```vue
+<script setup lang="ts">
+import { useForwardedRef } from "vue-forward-ref"
 
-Add the global macro type in `tsconfig.json`:
+function focus() {}
+function blur() {}
 
-```json
-{
-  "compilerOptions": {
-    "types": ["unplugin-vue-ref-prop/global"]
-  }
-}
+const ref = useForwardedRef<HTMLInputElement>(() => ({
+  focus,
+  blur
+}))
+</script>
 ```
+
+The `useForwardedRef()` call is erased before Vue compiles the SFC.

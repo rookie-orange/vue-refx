@@ -1,24 +1,32 @@
 import MagicString from "magic-string"
 import type {
+  ArrowFunctionExpression,
   CallExpression,
   File,
+  FunctionExpression,
   ImportDeclaration,
+  ObjectExpression,
   TSTypeParameterInstantiation,
   VariableDeclarator
 } from "@babel/types"
-import { parseScript } from "./ast"
+import { getNodeSource, parseScript } from "./ast"
 import { traverse, type NodePath } from "./babelTraverse"
-import { REF_PROP_NAME, USE_REF_PROP } from "./constants"
+import {
+  FORWARDED_REF_IMPORT_SOURCES,
+  FORWARDED_REF_PROP_NAME,
+  USE_FORWARDED_REF
+} from "./constants"
 
 export interface TransformScriptSetupOptions {
   offset: number
 }
 
-interface MacroBinding {
+interface ForwardedRefBinding {
   local: string
   call: CallExpression
   statementStart: number
   typeSource: string | null
+  exposeProperties: string[]
 }
 
 interface DefinePropsCall {
@@ -29,9 +37,10 @@ interface DefinePropsCall {
 
 interface ScriptScope {
   bindings: Set<string>
+  forwardedRefLocals: Set<string>
   hasVueRefType: boolean
-  removableUseRefPropImports: ImportDeclaration[]
-  removableUseRefPropSpecifiers: Array<{
+  removableForwardedRefImports: ImportDeclaration[]
+  removableForwardedRefSpecifiers: Array<{
     declaration: ImportDeclaration
     specifierStart: number
     specifierEnd: number
@@ -39,7 +48,7 @@ interface ScriptScope {
 }
 
 export interface ScriptTransformMeta {
-  hasUseRefProp: boolean
+  hasUseForwardedRef: boolean
 }
 
 export function transformScriptSetup(
@@ -47,78 +56,105 @@ export function transformScriptSetup(
   s: MagicString,
   options: TransformScriptSetupOptions
 ): ScriptTransformMeta {
-  if (!code.includes(USE_REF_PROP)) {
-    return { hasUseRefProp: false }
+  if (!code.includes(USE_FORWARDED_REF)) {
+    return { hasUseForwardedRef: false }
   }
 
   const ast = parseScript(code)
-  const macros = collectMacroBindings(code, ast)
+  const scope = collectScriptScope(ast)
 
-  if (macros.length === 0) {
-    return { hasUseRefProp: false }
+  if (scope.forwardedRefLocals.size === 0) {
+    return { hasUseForwardedRef: false }
   }
 
-  const scope = collectScriptScope(ast)
-  const defineProps = collectDefineProps(ast)[0] ?? null
-  const propsIdentifier = defineProps?.propsIdentifier ?? choosePropsIdentifier(scope.bindings)
-  const refType = buildRefType(macros)
-  const propShape = `{ ${REF_PROP_NAME}?: ${refType} }`
+  const bindings = collectForwardedRefBindings(code, ast, scope.forwardedRefLocals)
 
-  removeUseRefPropImports(s, options.offset, scope)
+  if (bindings.length === 0) {
+    return { hasUseForwardedRef: false }
+  }
+
+  const defineProps = collectDefineProps(ast)[0] ?? null
+  const defineExpose = collectDefineExpose(ast)[0] ?? null
+  const propsIdentifier = defineProps?.propsIdentifier ?? choosePropsIdentifier(scope.bindings)
+  const refType = buildRefType(bindings)
+  const propShape = `{ ${FORWARDED_REF_PROP_NAME}?: ${refType} | ((value: any) => void) }`
+  const exposedProperties = bindings.flatMap((binding) => binding.exposeProperties)
+
+  removeForwardedRefImports(s, options.offset, scope)
 
   if (!scope.hasVueRefType) {
     s.prependLeft(options.offset, `import type { Ref } from "vue"\n`)
   }
 
+  const insertionPoint = Math.min(...bindings.map((binding) => binding.statementStart))
+  const insertions: string[] = []
+
   if (defineProps) {
     mergeDefinePropsType(code, s, options.offset, defineProps.call, propShape)
   } else {
-    const insertionPoint = Math.min(...macros.map((macro) => macro.statementStart))
-    s.prependLeft(
-      options.offset + insertionPoint,
-      `const ${propsIdentifier} = defineProps<${propShape}>()\n\n`
-    )
+    insertions.push(`const ${propsIdentifier} = defineProps<${propShape}>()`)
   }
 
-  for (const macro of macros) {
+  if (exposedProperties.length > 0) {
+    if (defineExpose) {
+      mergeDefineExpose(code, s, options.offset, defineExpose.call, exposedProperties)
+    } else {
+      insertions.push(`defineExpose(${buildExposeObjectSource(exposedProperties)})`)
+    }
+  }
+
+  if (insertions.length > 0) {
+    s.prependLeft(options.offset + insertionPoint, `${insertions.join("\n\n")}\n\n`)
+  }
+
+  for (const binding of bindings) {
     s.overwrite(
-      options.offset + assertPosition(macro.call.start),
-      options.offset + assertPosition(macro.call.end),
-      `${propsIdentifier}.${REF_PROP_NAME}`
+      options.offset + assertPosition(binding.call.start),
+      options.offset + assertPosition(binding.call.end),
+      `${propsIdentifier}.${FORWARDED_REF_PROP_NAME}`
     )
   }
 
-  return { hasUseRefProp: true }
+  return { hasUseForwardedRef: true }
 }
 
-function collectMacroBindings(code: string, ast: File): MacroBinding[] {
-  const macros: MacroBinding[] = []
+function collectForwardedRefBindings(
+  code: string,
+  ast: File,
+  forwardedRefLocals: Set<string>
+): ForwardedRefBinding[] {
+  const bindings: ForwardedRefBinding[] = []
 
   traverse(ast, {
     VariableDeclarator(path) {
       const node = path.node
 
-      if (!node.init || node.init.type !== "CallExpression" || !isUseRefPropCall(node.init)) {
+      if (
+        !node.init ||
+        node.init.type !== "CallExpression" ||
+        !isUseForwardedRefCall(node.init, forwardedRefLocals)
+      ) {
         return
       }
 
       if (node.id.type !== "Identifier") {
-        throw new Error("useRefProp() macro must be assigned to an identifier.")
+        throw new Error("useForwardedRef() must be assigned to an identifier.")
       }
 
       const declaration = path.findParent((parent) => parent.isVariableDeclaration())
       const statementStart = declaration?.node.start ?? node.start
 
-      macros.push({
+      bindings.push({
         local: node.id.name,
         call: node.init,
         statementStart: assertPosition(statementStart),
-        typeSource: getUseRefPropTypeSource(code, node.init)
+        typeSource: getUseForwardedRefTypeSource(code, node.init),
+        exposeProperties: getFactoryExposeProperties(code, node.init)
       })
     }
   })
 
-  return macros
+  return bindings
 }
 
 function collectDefineProps(ast: File): DefinePropsCall[] {
@@ -148,11 +184,34 @@ function collectDefineProps(ast: File): DefinePropsCall[] {
   return calls
 }
 
+interface DefineExposeCall {
+  call: CallExpression
+}
+
+function collectDefineExpose(ast: File): DefineExposeCall[] {
+  const calls: DefineExposeCall[] = []
+
+  traverse(ast, {
+    CallExpression(path) {
+      const node = path.node
+
+      if (node.callee.type !== "Identifier" || node.callee.name !== "defineExpose") {
+        return
+      }
+
+      calls.push({ call: node })
+    }
+  })
+
+  return calls
+}
+
 function collectScriptScope(ast: File): ScriptScope {
   const bindings = new Set<string>()
+  const forwardedRefLocals = new Set<string>()
   let hasVueRefType = false
-  const removableUseRefPropImports: ImportDeclaration[] = []
-  const removableUseRefPropSpecifiers: ScriptScope["removableUseRefPropSpecifiers"] = []
+  const removableForwardedRefImports: ImportDeclaration[] = []
+  const removableForwardedRefSpecifiers: ScriptScope["removableForwardedRefSpecifiers"] = []
 
   traverse(ast, {
     Program(path) {
@@ -172,28 +231,33 @@ function collectScriptScope(ast: File): ScriptScope {
         }
       }
 
-      if (!isRuntimeImportSource(node.source.value)) {
+      if (!isForwardedRefImportSource(node.source.value) || node.importKind === "type") {
         return
       }
 
-      const useRefSpecifiers = node.specifiers.filter(
+      const forwardedRefSpecifiers = node.specifiers.filter(
         (specifier) =>
           specifier.type === "ImportSpecifier" &&
           specifier.imported.type === "Identifier" &&
-          specifier.imported.name === USE_REF_PROP
+          specifier.imported.name === USE_FORWARDED_REF &&
+          specifier.importKind !== "type"
       )
 
-      if (useRefSpecifiers.length === 0) {
+      for (const specifier of forwardedRefSpecifiers) {
+        forwardedRefLocals.add(specifier.local.name)
+      }
+
+      if (forwardedRefSpecifiers.length === 0) {
         return
       }
 
-      if (useRefSpecifiers.length === node.specifiers.length) {
-        removableUseRefPropImports.push(node)
+      if (forwardedRefSpecifiers.length === node.specifiers.length) {
+        removableForwardedRefImports.push(node)
         return
       }
 
-      for (const specifier of useRefSpecifiers) {
-        removableUseRefPropSpecifiers.push({
+      for (const specifier of forwardedRefSpecifiers) {
+        removableForwardedRefSpecifiers.push({
           declaration: node,
           specifierStart: assertPosition(specifier.start),
           specifierEnd: assertPosition(specifier.end)
@@ -204,9 +268,10 @@ function collectScriptScope(ast: File): ScriptScope {
 
   return {
     bindings,
+    forwardedRefLocals,
     hasVueRefType,
-    removableUseRefPropImports,
-    removableUseRefPropSpecifiers
+    removableForwardedRefImports,
+    removableForwardedRefSpecifiers
   }
 }
 
@@ -236,12 +301,92 @@ function mergeDefinePropsType(
   )
 }
 
-function removeUseRefPropImports(s: MagicString, offset: number, scope: ScriptScope): void {
-  for (const declaration of scope.removableUseRefPropImports) {
+function mergeDefineExpose(
+  code: string,
+  s: MagicString,
+  offset: number,
+  call: CallExpression,
+  properties: string[]
+): void {
+  const argument = call.arguments[0]
+
+  if (!argument) {
+    s.appendLeft(offset + assertPosition(call.end) - 1, buildExposeObjectSource(properties))
+    return
+  }
+
+  if (argument.type === "ObjectExpression") {
+    appendObjectProperties(code, s, offset, argument, properties)
+    return
+  }
+
+  if (argument.type === "SpreadElement" || argument.type === "ArgumentPlaceholder") {
+    return
+  }
+
+  s.overwrite(
+    offset + assertPosition(argument.start),
+    offset + assertPosition(argument.end),
+    `{ ...${getNodeSource(code, argument)}, ${properties.join(", ")} }`
+  )
+}
+
+function appendObjectProperties(
+  code: string,
+  s: MagicString,
+  offset: number,
+  object: ObjectExpression,
+  properties: string[]
+): void {
+  const objectStart = assertPosition(object.start)
+  const objectEnd = assertPosition(object.end)
+
+  if (object.properties.length === 0) {
+    s.appendLeft(offset + objectStart + 1, ` ${properties.join(", ")} `)
+    return
+  }
+
+  const lastProperty = object.properties[object.properties.length - 1]
+  const lastPropertyEnd = assertPosition(lastProperty.end)
+  const trailingSource = code.slice(lastPropertyEnd, objectEnd - 1)
+  const commaIndex = trailingSource.indexOf(",")
+  const insertionPoint = commaIndex >= 0
+    ? lastPropertyEnd + commaIndex + 1
+    : lastPropertyEnd
+  const needsComma = commaIndex < 0
+  const isMultiline = code.slice(objectStart, objectEnd).includes("\n")
+
+  if (isMultiline) {
+    const indent = getLineIndent(code, assertPosition(lastProperty.start))
+    s.appendLeft(
+      offset + insertionPoint,
+      `${needsComma ? "," : ""}\n${indent}${properties.join(`,\n${indent}`)}`
+    )
+    return
+  }
+
+  s.appendLeft(
+    offset + insertionPoint,
+    `${needsComma ? "," : ""} ${properties.join(", ")}`
+  )
+}
+
+function buildExposeObjectSource(properties: string[]): string {
+  return `{\n  ${properties.join(",\n  ")}\n}`
+}
+
+function getLineIndent(code: string, position: number): string {
+  const lineStart = code.lastIndexOf("\n", position) + 1
+  const line = code.slice(lineStart, position)
+  return line.match(/^\s*/)?.[0] ?? "  "
+}
+
+function removeForwardedRefImports(s: MagicString, offset: number, scope: ScriptScope): void {
+  for (const declaration of scope.removableForwardedRefImports) {
     s.remove(offset + assertPosition(declaration.start), offset + assertPosition(declaration.end))
   }
 
-  for (const specifier of scope.removableUseRefPropSpecifiers) {
+  for (const specifier of scope.removableForwardedRefSpecifiers) {
     const specifierStart = specifier.specifierStart
     const specifierEnd = specifier.specifierEnd
     const declaration = specifier.declaration
@@ -262,7 +407,7 @@ function removeUseRefPropImports(s: MagicString, offset: number, scope: ScriptSc
   }
 }
 
-function getUseRefPropTypeSource(code: string, call: CallExpression): string | null {
+function getUseForwardedRefTypeSource(code: string, call: CallExpression): string | null {
   const typeParameters = call.typeParameters as TSTypeParameterInstantiation | undefined
 
   if (!typeParameters || typeParameters.params.length === 0) {
@@ -277,8 +422,52 @@ function getUseRefPropTypeSource(code: string, call: CallExpression): string | n
     .trim()
 }
 
-function buildRefType(macros: MacroBinding[]): string {
-  const typeSources = [...new Set(macros.map((macro) => macro.typeSource).filter(Boolean))]
+function getFactoryExposeProperties(code: string, call: CallExpression): string[] {
+  const factory = call.arguments[0]
+
+  if (
+    !factory ||
+    (
+      factory.type !== "ArrowFunctionExpression" &&
+      factory.type !== "FunctionExpression"
+    )
+  ) {
+    return []
+  }
+
+  const object = getFactoryObjectExpression(factory)
+
+  if (!object) {
+    return []
+  }
+
+  return object.properties
+    .map((property) => getNodeSource(code, property).trim())
+    .filter(Boolean)
+}
+
+function getFactoryObjectExpression(
+  factory: ArrowFunctionExpression | FunctionExpression
+): ObjectExpression | null {
+  if (factory.body.type === "ObjectExpression") {
+    return factory.body
+  }
+
+  if (factory.body.type !== "BlockStatement") {
+    return null
+  }
+
+  for (const statement of factory.body.body) {
+    if (statement.type === "ReturnStatement" && statement.argument?.type === "ObjectExpression") {
+      return statement.argument
+    }
+  }
+
+  return null
+}
+
+function buildRefType(bindings: ForwardedRefBinding[]): string {
+  const typeSources = [...new Set(bindings.map((binding) => binding.typeSource).filter(Boolean))]
 
   if (typeSources.length === 0) {
     return "Ref<any>"
@@ -294,22 +483,22 @@ function choosePropsIdentifier(bindings: Set<string>): string {
   }
 
   let index = 1
-  let candidate = "__refPropProps"
+  let candidate = "__forwardedRefProps"
 
   while (bindings.has(candidate)) {
-    candidate = `__refPropProps${index}`
+    candidate = `__forwardedRefProps${index}`
     index += 1
   }
 
   return candidate
 }
 
-function isUseRefPropCall(node: CallExpression): boolean {
-  return node.callee.type === "Identifier" && node.callee.name === USE_REF_PROP
+function isUseForwardedRefCall(node: CallExpression, forwardedRefLocals: Set<string>): boolean {
+  return node.callee.type === "Identifier" && forwardedRefLocals.has(node.callee.name)
 }
 
-function isRuntimeImportSource(source: string): boolean {
-  return source === "unplugin-vue-ref-prop/runtime" || source === "unplugin-vue-ref-prop"
+function isForwardedRefImportSource(source: string): boolean {
+  return FORWARDED_REF_IMPORT_SOURCES.has(source)
 }
 
 function assertPosition(value: number | null | undefined): number {

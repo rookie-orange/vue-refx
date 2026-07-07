@@ -1,5 +1,5 @@
 import type { Ref } from "vue"
 
-export function useRefProp<T = any>(): Ref<T | null> {
-  throw new Error("Compiler Macro")
+export function useForwardedRef<T = any>(_factory?: () => unknown): Ref<T | null> {
+  throw new Error("useForwardedRef() must be compiled away by vue-forward-ref.")
 }

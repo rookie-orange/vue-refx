@@ -5,14 +5,13 @@ import {
   ElementTypes,
   NodeTypes,
   parse,
-  type RootNode,
   type TemplateChildNode
 } from "@vue/compiler-dom"
-import { REF_PROP_NAME } from "./constants"
+import { FORWARDED_REF_PROP_NAME } from "./constants"
 
 export interface TransformTemplateOptions {
   offset: number
-  refPropComponents: Set<string>
+  forwardedRefComponents: Set<string>
 }
 
 export function transformTemplate(
@@ -31,23 +30,21 @@ export function transformTemplate(
       return
     }
 
-    if (!shouldInjectRefProp(node.tag, node.tagType, options.refPropComponents)) {
+    if (!shouldInjectForwardedRef(node.tag, node.tagType, options.forwardedRefComponents)) {
       return
     }
 
-    const refExpression = getRefExpression(node.props)
+    const refBinding = getRefBinding(node.props)
 
-    if (!refExpression || hasRefPropBinding(node.props)) {
+    if (!refBinding || hasForwardedRefBinding(node.props)) {
       return
     }
 
-    const insertAt = findOpenTagInsertionPoint(code, node.loc.start.offset)
-
-    if (insertAt == null) {
-      return
-    }
-
-    s.appendLeft(options.offset + insertAt, ` :${REF_PROP_NAME}="${escapeAttribute(refExpression)}"`)
+    s.overwrite(
+      options.offset + refBinding.start,
+      options.offset + refBinding.end,
+      `:${FORWARDED_REF_PROP_NAME}="${escapeAttribute(buildForwardedRefExpression(refBinding.expression))}"`
+    )
   })
 }
 
@@ -67,22 +64,35 @@ function walk(nodes: TemplateChildNode[], visitor: (node: TemplateChildNode) => 
   }
 }
 
-function shouldInjectRefProp(
+function shouldInjectForwardedRef(
   tag: string,
   tagType: ElementTypes,
-  refPropComponents: Set<string>
+  forwardedRefComponents: Set<string>
 ): boolean {
   if (tagType !== ElementTypes.COMPONENT && !isLikelyComponentTag(tag)) {
     return false
   }
 
-  return getComponentAliases(tag).some((alias) => refPropComponents.has(alias))
+  return getComponentAliases(tag).some((alias) => forwardedRefComponents.has(alias))
 }
 
-function getRefExpression(props: Array<AttributeNode | DirectiveNode>): string | null {
+interface RefBinding {
+  expression: string
+  start: number
+  end: number
+}
+
+function getRefBinding(props: Array<AttributeNode | DirectiveNode>): RefBinding | null {
   for (const prop of props) {
     if (prop.type === NodeTypes.ATTRIBUTE && prop.name === "ref") {
-      return prop.value?.content.trim() || null
+      const expression = prop.value?.content.trim()
+      return expression
+        ? {
+            expression,
+            start: prop.loc.start.offset,
+            end: prop.loc.end.offset
+          }
+        : null
     }
 
     if (
@@ -91,8 +101,16 @@ function getRefExpression(props: Array<AttributeNode | DirectiveNode>): string |
       prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION &&
       prop.arg.content === "ref"
     ) {
-      return prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
-        ? prop.exp.content.trim() || null
+      const expression = prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+        ? prop.exp.content.trim()
+        : null
+
+      return expression
+        ? {
+            expression,
+            start: prop.loc.start.offset,
+            end: prop.loc.end.offset
+          }
         : null
     }
   }
@@ -100,9 +118,9 @@ function getRefExpression(props: Array<AttributeNode | DirectiveNode>): string |
   return null
 }
 
-function hasRefPropBinding(props: Array<AttributeNode | DirectiveNode>): boolean {
+function hasForwardedRefBinding(props: Array<AttributeNode | DirectiveNode>): boolean {
   for (const prop of props) {
-    if (prop.type === NodeTypes.ATTRIBUTE && prop.name === REF_PROP_NAME) {
+    if (prop.type === NodeTypes.ATTRIBUTE && prop.name === FORWARDED_REF_PROP_NAME) {
       return true
     }
 
@@ -110,7 +128,7 @@ function hasRefPropBinding(props: Array<AttributeNode | DirectiveNode>): boolean
       prop.type === NodeTypes.DIRECTIVE &&
       prop.name === "bind" &&
       prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION &&
-      prop.arg.content === REF_PROP_NAME
+      prop.arg.content === FORWARDED_REF_PROP_NAME
     ) {
       return true
     }
@@ -119,47 +137,20 @@ function hasRefPropBinding(props: Array<AttributeNode | DirectiveNode>): boolean
   return false
 }
 
-function findOpenTagInsertionPoint(code: string, start: number): number | null {
-  let quote: string | null = null
-
-  for (let index = start; index < code.length; index += 1) {
-    const char = code[index]
-
-    if (quote) {
-      if (char === quote) {
-        quote = null
-      }
-
-      continue
-    }
-
-    if (char === "\"" || char === "'") {
-      quote = char
-      continue
-    }
-
-    if (char === ">") {
-      let insertion = index
-
-      for (let cursor = index - 1; cursor >= start; cursor -= 1) {
-        const current = code[cursor]
-
-        if (/\s/.test(current)) {
-          continue
-        }
-
-        if (current === "/") {
-          insertion = cursor
-        }
-
-        break
-      }
-
-      return insertion
-    }
+function buildForwardedRefExpression(expression: string): string {
+  if (isFunctionRefExpression(expression) || !isAssignableExpression(expression)) {
+    return expression
   }
 
-  return null
+  return `(value) => typeof ${expression} === "function" ? ${expression}(value) : (${expression} = value)`
+}
+
+function isFunctionRefExpression(expression: string): boolean {
+  return expression.includes("=>") || /^function\b/.test(expression.trim())
+}
+
+function isAssignableExpression(expression: string): boolean {
+  return /^[A-Za-z_$][\w$]*(?:\s*(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\]))*$/.test(expression.trim())
 }
 
 function getComponentAliases(tag: string): string[] {

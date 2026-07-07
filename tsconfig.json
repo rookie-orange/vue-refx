@@ -3,8 +3,7 @@
   "include": [
     "packages/**/*.ts",
     "test/**/*.ts",
-    "tsup.config.ts",
-    "global.d.ts"
+    "tsup.config.ts"
   ],
   "exclude": [
     "dist",

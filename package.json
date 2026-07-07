@@ -1,15 +1,15 @@
 {
-  "name": "unplugin-vue-ref-prop",
+  "name": "vue-forward-ref",
   "version": "0.1.0",
-  "description": "Vue compiler macro that forwards component template refs as props without patching Vue runtime.",
+  "description": "React-style forwarded refs for Vue, implemented as a compiler transform.",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/vite.d.ts",
-      "import": "./dist/vite.js",
-      "require": "./dist/vite.cjs"
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js",
+      "require": "./dist/runtime.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",
@@ -21,17 +21,13 @@
       "import": "./dist/runtime.js",
       "require": "./dist/runtime.cjs"
     },
-    "./global": {
-      "types": "./global.d.ts"
-    },
     "./package.json": "./package.json"
   },
-  "main": "./dist/vite.cjs",
-  "module": "./dist/vite.js",
-  "types": "./dist/vite.d.ts",
+  "main": "./dist/runtime.cjs",
+  "module": "./dist/runtime.js",
+  "types": "./dist/runtime.d.ts",
   "files": [
     "dist",
-    "global.d.ts",
     "packages"
   ],
   "scripts": {
@@ -55,11 +51,11 @@
   "devDependencies": {
     "@types/babel__traverse": "^7.20.6",
     "@types/node": "^22.10.2",
-    "@vitejs/plugin-vue": "^5.2.1",
+    "@vitejs/plugin-vue": "^6.0.7",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7",
-    "vitest": "^2.1.8",
+    "vite": "^8.1.3",
+    "vitest": "^4.1.10",
     "vue": "^3.5.13"
   }
 }

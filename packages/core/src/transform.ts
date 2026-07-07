@@ -1,6 +1,6 @@
 import MagicString from "magic-string"
 import { parse } from "@vue/compiler-sfc"
-import { descriptorUsesRefProp } from "./analyze"
+import { descriptorUsesForwardedRef } from "./analyze"
 import { collectVueComponentImportsFromDescriptor } from "./componentImports"
 import { transformScriptSetup } from "./script"
 import { transformTemplate } from "./template"
@@ -14,20 +14,20 @@ export function transformVueSfc(source: string, options: TransformVueOptions = {
   const s = new MagicString(source)
   const scriptSetup = descriptor.scriptSetup
   const template = descriptor.template
-  const refPropComponents = new Set(options.refPropComponents ?? [])
-  let hasUseRefProp = descriptorUsesRefProp(descriptor)
+  const forwardedRefComponents = new Set(options.forwardedRefComponents ?? [])
+  let hasUseForwardedRef = descriptorUsesForwardedRef(descriptor)
 
   if (scriptSetup) {
     const meta = transformScriptSetup(scriptSetup.content, s, {
       offset: scriptSetup.loc.start.offset
     })
-    hasUseRefProp = meta.hasUseRefProp
+    hasUseForwardedRef = meta.hasUseForwardedRef
   }
 
-  if (template && refPropComponents.size > 0) {
+  if (template && forwardedRefComponents.size > 0) {
     transformTemplate(template.content, s, {
       offset: template.loc.start.offset,
-      refPropComponents
+      forwardedRefComponents
     })
   }
 
@@ -43,7 +43,7 @@ export function transformVueSfc(source: string, options: TransformVueOptions = {
         })
       : null,
     hasChanged,
-    hasUseRefProp
+    hasUseForwardedRef
   }
 }
 

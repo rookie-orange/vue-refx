@@ -1,4 +1,8 @@
-export { analyzeVueSfc, descriptorUsesRefProp, scriptUsesRefProp } from "./analyze"
+export {
+  analyzeVueSfc,
+  descriptorUsesForwardedRef,
+  scriptUsesForwardedRef
+} from "./analyze"
 export { collectVueComponentImports, collectVueComponentImportsFromDescriptor } from "./componentImports"
 export { transformScriptSetup } from "./script"
 export { transformTemplate } from "./template"

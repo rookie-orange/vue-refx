@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { nextTick, onMounted, ref } from "vue"
 import MyInput from "./MyInput.vue"
 
 const input = ref<HTMLInputElement | null>(null)

@@ -3,35 +3,54 @@ import { parse, type SFCDescriptor } from "@vue/compiler-sfc"
 import { parseScript } from "./ast"
 import { traverse } from "./babelTraverse"
 import { collectVueComponentImportsFromDescriptor } from "./componentImports"
-import { USE_REF_PROP } from "./constants"
+import { FORWARDED_REF_IMPORT_SOURCES, USE_FORWARDED_REF } from "./constants"
 import type { AnalyzeResult } from "./types"
 
 export function analyzeVueSfc(source: string): AnalyzeResult {
   const descriptor = parse(source).descriptor
 
   return {
-    hasUseRefProp: descriptorUsesRefProp(descriptor),
+    hasUseForwardedRef: descriptorUsesForwardedRef(descriptor),
     imports: collectVueComponentImportsFromDescriptor(source, descriptor)
   }
 }
 
-export function descriptorUsesRefProp(descriptor: SFCDescriptor): boolean {
+export function descriptorUsesForwardedRef(descriptor: SFCDescriptor): boolean {
   const setup = descriptor.scriptSetup
 
-  if (!setup?.content || !setup.content.includes(USE_REF_PROP)) {
+  if (!setup?.content || !setup.content.includes(USE_FORWARDED_REF)) {
     return false
   }
 
-  return scriptUsesRefProp(setup.content)
+  return scriptUsesForwardedRef(setup.content)
 }
 
-export function scriptUsesRefProp(code: string): boolean {
+export function scriptUsesForwardedRef(code: string): boolean {
   let found = false
   const ast = parseScript(code)
+  const forwardedRefLocals = new Set<string>()
 
   traverse(ast, {
+    ImportDeclaration(path) {
+      const node = path.node
+
+      if (!FORWARDED_REF_IMPORT_SOURCES.has(node.source.value) || node.importKind === "type") {
+        return
+      }
+
+      for (const specifier of node.specifiers) {
+        if (
+          specifier.type === "ImportSpecifier" &&
+          specifier.imported.type === "Identifier" &&
+          specifier.imported.name === USE_FORWARDED_REF &&
+          specifier.importKind !== "type"
+        ) {
+          forwardedRefLocals.add(specifier.local.name)
+        }
+      }
+    },
     CallExpression(path) {
-      if (isUseRefPropCall(path.node)) {
+      if (isUseForwardedRefCall(path.node, forwardedRefLocals)) {
         found = true
         path.stop()
       }
@@ -41,6 +60,9 @@ export function scriptUsesRefProp(code: string): boolean {
   return found
 }
 
-export function isUseRefPropCall(node: CallExpression): boolean {
-  return node.callee.type === "Identifier" && node.callee.name === USE_REF_PROP
+export function isUseForwardedRefCall(
+  node: CallExpression,
+  forwardedRefLocals: Set<string>
+): boolean {
+  return node.callee.type === "Identifier" && forwardedRefLocals.has(node.callee.name)
 }

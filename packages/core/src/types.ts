@@ -6,7 +6,7 @@ export interface ComponentImport {
 }
 
 export interface TransformVueOptions {
-  refPropComponents?: Set<string> | string[]
+  forwardedRefComponents?: Set<string> | string[]
   filename?: string
   sourceMap?: boolean
 }
@@ -15,10 +15,10 @@ export interface TransformResult {
   code: string
   map: SourceMap | null
   hasChanged: boolean
-  hasUseRefProp: boolean
+  hasUseForwardedRef: boolean
 }
 
 export interface AnalyzeResult {
-  hasUseRefProp: boolean
+  hasUseForwardedRef: boolean
   imports: ComponentImport[]
 }

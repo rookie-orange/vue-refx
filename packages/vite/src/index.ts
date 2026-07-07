@@ -9,7 +9,7 @@ import {
   type ComponentImport
 } from "../../core/src"
 
-export interface RefPropOptions {
+export interface ForwardRefOptions {
   include?: FilterPattern
   exclude?: FilterPattern
   sourcemap?: boolean
@@ -20,10 +20,10 @@ type FilterPattern = RegExp | string | Array<RegExp | string>
 
 interface CachedAnalysis {
   mtimeMs: number
-  hasUseRefProp: boolean
+  hasUseForwardedRef: boolean
 }
 
-export const unplugin = createUnplugin<RefPropOptions | undefined>((options = {}) => {
+export const unplugin = createUnplugin<ForwardRefOptions | undefined>((options = {}) => {
   const filter = createIdFilter(options.include ?? /\.vue$/, options.exclude)
   const analysisCache = new Map<string, CachedAnalysis>()
   const importerByChild = new Map<string, Set<string>>()
@@ -37,27 +37,27 @@ export const unplugin = createUnplugin<RefPropOptions | undefined>((options = {}
       const cached = analysisCache.get(normalized)
 
       if (cached && cached.mtimeMs === stat.mtimeMs) {
-        return cached.hasUseRefProp
+        return cached.hasUseForwardedRef
       }
 
       const code = fallbackCode ?? await fs.readFile(normalized, "utf8")
-      const hasUseRefProp = analyzeVueSfc(code).hasUseRefProp
+      const hasUseForwardedRef = analyzeVueSfc(code).hasUseForwardedRef
       analysisCache.set(normalized, {
         mtimeMs: stat.mtimeMs,
-        hasUseRefProp
+        hasUseForwardedRef
       })
 
-      return hasUseRefProp
+      return hasUseForwardedRef
     } catch {
       if (fallbackCode == null) {
         return false
       }
 
-      return analyzeVueSfc(fallbackCode).hasUseRefProp
+      return analyzeVueSfc(fallbackCode).hasUseForwardedRef
     }
   }
 
-  async function resolveRefPropComponents(
+  async function resolveForwardedRefComponents(
     code: string,
     id: string,
     context: {
@@ -123,14 +123,14 @@ export const unplugin = createUnplugin<RefPropOptions | undefined>((options = {}
   }
 
   return {
-    name: "unplugin-vue-ref-prop",
+    name: "vue-forward-ref",
     enforce: "pre",
     vite: {
       configResolved(config) {
         const hasVuePlugin = config.plugins.some((plugin) => plugin.name === "vite:vue")
 
         if (!hasVuePlugin) {
-          config.logger.warn("unplugin-vue-ref-prop should be used with @vitejs/plugin-vue.")
+          config.logger.warn("vue-forward-ref should be used with @vitejs/plugin-vue.")
         }
       },
       configureServer(viteServer) {
@@ -155,16 +155,16 @@ export const unplugin = createUnplugin<RefPropOptions | undefined>((options = {}
         return null
       }
 
-      const refPropComponents = await resolveRefPropComponents(code, cleanId, this)
+      const forwardedRefComponents = await resolveForwardedRefComponents(code, cleanId, this)
       const result = transformVueSfc(code, {
         filename: cleanId,
-        refPropComponents,
+        forwardedRefComponents,
         sourceMap: options.sourcemap ?? true
       })
 
       analysisCache.set(normalizePath(cleanId), {
         mtimeMs: await getMtime(cleanId),
-        hasUseRefProp: result.hasUseRefProp
+        hasUseForwardedRef: result.hasUseForwardedRef
       })
 
       if (!result.hasChanged) {
