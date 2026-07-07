@@ -3,7 +3,7 @@
   "include": [
     "packages/**/*.ts",
     "test/**/*.ts",
-    "tsup.config.ts"
+    "tsdown.config.ts"
   ],
   "exclude": [
     "dist",
