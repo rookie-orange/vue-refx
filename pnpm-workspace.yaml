@@ -2,6 +2,9 @@ packages:
   - playground
   - examples/*
 
+allowBuilds:
+  esbuild: true
+
 catalog:
   "@vitejs/plugin-vue": ^6.0.7
   typescript: ^5.7.2
