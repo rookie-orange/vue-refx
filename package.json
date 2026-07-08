@@ -30,6 +30,9 @@
     },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "pnpm --dir playground dev",
@@ -37,6 +40,9 @@
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
+    "pack:check": "npm --cache ./.npm-cache --registry https://registry.npmjs.org/ pack --dry-run",
+    "release": "bumpp --git-check --no-push --execute \"pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm pack:check\" && npm --cache ./.npm-cache --registry https://registry.npmjs.org/ publish && git push --follow-tags",
+    "release:version": "bumpp --git-check --no-push",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -53,6 +59,7 @@
     "@types/babel__traverse": "^7.20.6",
     "@types/node": "^22.10.2",
     "@vitejs/plugin-vue": "catalog:",
+    "bumpp": "^11.1.0",
     "oxfmt": "^0.57.0",
     "oxlint": "^1.72.0",
     "tsdown": "^0.22.3",

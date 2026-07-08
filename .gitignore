@@ -5,6 +5,7 @@ dist
 *.log
 .vercel
 coverage
+.npm-cache
 
 *local*
 
