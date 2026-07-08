@@ -2,47 +2,17 @@
 
 [中文](./README.zh-CN.md) | English
 
-React-style forwarded refs for Vue.
+Compiler-only forwarded refs for Vue, centered on one macro:
 
-Forward refs through components just like React 19 — without modifying Vue runtime.
-
-- ⚡ Zero runtime
-- ⚡ Zero Vue runtime patch
-- ⚡ Compiler transform only
-- ⚡ Fully compatible with existing `ref`
-- ⚡ TypeScript support
-
----
-
-## Why?
-
-Vue already provides `defineExpose()`, which is great for exposing component methods.
-
-However, Vue does not provide **transparent ref forwarding**.
-
-Consider the following component hierarchy:
-
-```text
-App
- │
- ▼
-<MyInput ref="input" />
- │
- ▼
-<BaseInput>
- │
- ▼
-<InputWrapper>
- │
- ▼
-<input>
+```ts
+defineForwardRef();
 ```
 
-With Vue today, every intermediate component must manually expose its internal instance or methods.
-
-With **vue-refx**, refs can be forwarded naturally through component boundaries, making deeply wrapped components behave like native elements.
-
----
+- Zero runtime
+- No Vue runtime patch
+- Compiler transform only
+- TypeScript support
+- Works with Vue's existing `ref`
 
 ## Installation
 
@@ -52,32 +22,28 @@ pnpm add vue-refx
 
 ```ts
 import vue from "@vitejs/plugin-vue";
-import VueRefs from "vue-refx/vite";
+import VueRefx from "vue-refx/vite";
 
 export default defineConfig({
-  plugins: [vue(), VueRefs()],
+  plugins: [vue(), VueRefx()],
 });
 ```
 
----
-
-## Basic Usage
-
-### Child component
+## Forward Only
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
+import { defineForwardRef } from "vue-refx";
 
-const ref = useForwardedRef<HTMLInputElement>();
+defineForwardRef("input");
 </script>
 
 <template>
-  <input ref="ref" />
+  <input ref="input" />
 </template>
 ```
 
-### Parent component
+A parent can use the component like a native input:
 
 ```vue
 <script setup lang="ts">
@@ -85,100 +51,45 @@ import { ref } from "vue";
 import MyInput from "./MyInput.vue";
 
 const input = ref<HTMLInputElement | null>(null);
-
-function focus() {
-  input.value?.focus();
-}
 </script>
 
 <template>
   <MyInput ref="input" />
+  <button type="button" @click="input?.focus()">Focus</button>
 </template>
 ```
 
-The forwarded ref automatically points to the native `<input>`.
+## Expose Only
 
----
-
-## Forward refs through multiple components
-
-Refs can be forwarded through any number of wrapper components.
-
-```text
-App
- │
- ▼
-<MyInput ref="input" />
- │
- ▼
-<BaseInput>
- │
- ▼
-<InputWrapper>
- │
- ▼
-<input>
-```
-
-MyInput.vue
+Use the same macro when you only need an imperative component API.
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
+import { defineForwardRef } from "vue-refx";
 
-const ref = useForwardedRef<HTMLInputElement>();
+function focus() {}
+function blur() {}
+
+defineForwardRef(() => ({
+  focus,
+  blur,
+}));
 </script>
-
-<template>
-  <BaseInput ref="ref" />
-</template>
 ```
 
-BaseInput.vue
+This compiles to a single `defineExpose()` call. In most components,
+`defineForwardRef()` replaces `defineExpose()` so you do not need to mix APIs.
+
+## Forward + Expose
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
+import { defineForwardRef } from "vue-refx";
 
-const ref = useForwardedRef<HTMLInputElement>();
-</script>
-
-<template>
-  <InputWrapper ref="ref" />
-</template>
-```
-
-InputWrapper.vue
-
-```vue
-<script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
-
-const ref = useForwardedRef<HTMLInputElement>();
-</script>
-
-<template>
-  <input ref="ref" />
-</template>
-```
-
-The parent still receives the final native input element.
-
-No manual `defineExpose()` chaining is required.
-
----
-
-## Custom imperative handle
-
-Sometimes you don't want to expose the underlying element.
-
-Instead, expose a custom API.
-
-```vue
-<script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
-
-const input = ref<HTMLInputElement>();
+const input = defineForwardRef<HTMLInputElement>("input", () => ({
+  focus,
+  blur,
+}));
 
 function focus() {
   input.value?.focus();
@@ -187,11 +98,6 @@ function focus() {
 function blur() {
   input.value?.blur();
 }
-
-useForwardedRef(() => ({
-  focus,
-  blur,
-}));
 </script>
 
 <template>
@@ -199,134 +105,41 @@ useForwardedRef(() => ({
 </template>
 ```
 
-The parent now receives:
+The template ref is forwarded to the parent, and the factory object is merged
+into `defineExpose()`.
+
+## Return Value
+
+When assigned, the macro returns a typed Vue ref:
 
 ```ts
-input.value.focus();
-input.value.blur();
+const input = defineForwardRef<HTMLInputElement>("input");
+// Ref<HTMLInputElement | null>
 ```
 
-This is conceptually similar to React's `useImperativeHandle()`.
+When the return value is ignored, no local variable is generated.
 
----
+## Template Validation
 
-## How it works
+The compiler verifies every forwarded template ref name:
 
-vue-refx is **compiler-only**.
+```ts
+defineForwardRef("input");
+```
 
-Before compilation:
+must match:
 
 ```vue
-<MyInput ref="input" />
+<input ref="input" />
 ```
 
-After transformation:
+Otherwise compilation fails with:
 
-```vue
-<MyInput :__forwarded_ref__="(value) => (input = value)" />
+```text
+Cannot find template ref "input".
 ```
 
-Inside the child component:
+## Runtime
 
-```ts
-const ref = useForwardedRef();
-```
-
-is compiled into something equivalent to:
-
-```ts
-const props = defineProps<{
-  __forwarded_ref__?: ForwardedRef<any>;
-}>();
-
-let value = null;
-
-const ref = customRef((track, trigger) => ({
-  get() {
-    track();
-    return value;
-  },
-  set(nextValue) {
-    value = nextValue;
-    trigger();
-    const target = props.__forwarded_ref__;
-
-    if (typeof target === "function") {
-      target(nextValue);
-    } else if (target) {
-      target.value = nextValue;
-    }
-  },
-}));
-```
-
-When a factory is provided:
-
-```ts
-useForwardedRef(() => ({
-  focus,
-  blur,
-}));
-```
-
-the compiler generates the equivalent `defineExpose()` automatically.
-
-All of this happens during compilation.
-
-Nothing is executed at runtime.
-
----
-
-## Comparison
-
-| Feature                                  | Vue `defineExpose()` | vue-refx |
-| ---------------------------------------- | -------------------- | -------- |
-| Expose component methods                 | ✅                   | ✅       |
-| Forward refs through multiple components | ❌                   | ✅       |
-| Zero runtime                             | ✅                   | ✅       |
-| Runtime patch required                   | ❌                   | ❌       |
-| React-style forwarded ref API            | ❌                   | ✅       |
-
----
-
-## FAQ
-
-### Does this replace Vue's `ref`?
-
-No.
-
-Vue's native `ref` behavior is unchanged.
-
-vue-refx only forwards existing refs through components.
-
----
-
-### Does this modify Vue runtime?
-
-No.
-
-vue-refx is implemented entirely as a compiler transform.
-
----
-
-### Does this work with existing components?
-
-Yes.
-
-Components that don't use `useForwardedRef()` continue to behave exactly the same.
-
----
-
-### Is there any runtime cost?
-
-No.
-
-`useForwardedRef()` is completely erased during compilation.
-
-The generated code uses Vue's own `customRef()` to keep the local `.value` ref and the forwarded parent ref in sync.
-
----
-
-## License
-
-MIT
+`defineForwardRef()` exists in the runtime package only for TypeScript, IDEs,
+and auto import. Every macro call is erased by the compiler transform.

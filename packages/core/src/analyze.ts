@@ -1,34 +1,35 @@
 import type { CallExpression } from "@babel/types";
 import { parse, type SFCDescriptor } from "@vue/compiler-sfc";
 import { parseScript } from "./ast";
-import { traverse } from "./babelTraverse";
+import { traverse, type NodePath } from "./babelTraverse";
 import { collectVueComponentImportsFromDescriptor } from "./componentImports";
-import { FORWARDED_REF_IMPORT_SOURCES, USE_FORWARDED_REF } from "./constants";
+import { DEFINE_FORWARD_REF, FORWARDED_REF_IMPORT_SOURCES } from "./constants";
 import type { AnalyzeResult } from "./types";
 
 export function analyzeVueSfc(source: string): AnalyzeResult {
   const descriptor = parse(source).descriptor;
+  const hasDefineForwardRef = descriptorUsesDefineForwardRef(descriptor);
 
   return {
-    hasUseForwardedRef: descriptorUsesForwardedRef(descriptor),
+    hasDefineForwardRef,
     imports: collectVueComponentImportsFromDescriptor(source, descriptor),
   };
 }
 
-export function descriptorUsesForwardedRef(descriptor: SFCDescriptor): boolean {
+export function descriptorUsesDefineForwardRef(descriptor: SFCDescriptor): boolean {
   const setup = descriptor.scriptSetup;
 
-  if (!setup?.content || !setup.content.includes(USE_FORWARDED_REF)) {
+  if (!setup?.content || !setup.content.includes(DEFINE_FORWARD_REF)) {
     return false;
   }
 
-  return scriptUsesForwardedRef(setup.content);
+  return scriptUsesDefineForwardRef(setup.content);
 }
 
-export function scriptUsesForwardedRef(code: string): boolean {
+export function scriptUsesDefineForwardRef(code: string): boolean {
   let found = false;
   const ast = parseScript(code);
-  const forwardedRefLocals = new Set<string>();
+  const defineForwardRefLocals = new Set<string>();
 
   traverse(ast, {
     ImportDeclaration(path) {
@@ -42,15 +43,15 @@ export function scriptUsesForwardedRef(code: string): boolean {
         if (
           specifier.type === "ImportSpecifier" &&
           specifier.imported.type === "Identifier" &&
-          specifier.imported.name === USE_FORWARDED_REF &&
+          specifier.imported.name === DEFINE_FORWARD_REF &&
           specifier.importKind !== "type"
         ) {
-          forwardedRefLocals.add(specifier.local.name);
+          defineForwardRefLocals.add(specifier.local.name);
         }
       }
     },
     CallExpression(path) {
-      if (isUseForwardedRefCall(path.node, forwardedRefLocals)) {
+      if (isDefineForwardRefCall(path, defineForwardRefLocals)) {
         found = true;
         path.stop();
       }
@@ -60,9 +61,19 @@ export function scriptUsesForwardedRef(code: string): boolean {
   return found;
 }
 
-export function isUseForwardedRefCall(
-  node: CallExpression,
-  forwardedRefLocals: Set<string>,
+export function isDefineForwardRefCall(
+  path: NodePath<CallExpression>,
+  defineForwardRefLocals: Set<string>,
 ): boolean {
-  return node.callee.type === "Identifier" && forwardedRefLocals.has(node.callee.name);
+  const callee = path.node.callee;
+
+  if (callee.type !== "Identifier") {
+    return false;
+  }
+
+  if (defineForwardRefLocals.has(callee.name)) {
+    return true;
+  }
+
+  return callee.name === DEFINE_FORWARD_REF && !path.scope.hasBinding(DEFINE_FORWARD_REF);
 }

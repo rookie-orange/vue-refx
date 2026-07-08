@@ -12,20 +12,30 @@ import type {
 import { getNodeSource, parseScript } from "./ast";
 import { traverse, type NodePath } from "./babelTraverse";
 import {
+  DEFINE_FORWARD_REF,
   FORWARDED_REF_IMPORT_SOURCES,
   FORWARDED_REF_PROP_NAME,
-  USE_FORWARDED_REF,
 } from "./constants";
 
 export interface TransformScriptSetupOptions {
   offset: number;
 }
 
-interface ForwardedRefBinding {
+export interface LocalForwardedRef {
+  name: string;
+  binding: string | null;
+}
+
+interface DefineForwardRefBinding {
   call: CallExpression;
   statementStart: number;
+  statementEnd: number;
+  templateRef: string | null;
+  bindingIdentifier: string | null;
   typeSource: string | null;
   exposeProperties: string[];
+  isVariableInitializer: boolean;
+  isExpressionStatement: boolean;
 }
 
 interface DefinePropsCall {
@@ -37,10 +47,10 @@ interface DefinePropsCall {
 interface ScriptScope {
   bindings: Set<string>;
   customRefIdentifier: string | null;
-  forwardedRefLocals: Set<string>;
-  forwardedRefTypeIdentifier: string | null;
-  removableForwardedRefImports: ImportDeclaration[];
-  removableForwardedRefSpecifiers: Array<{
+  defineForwardRefLocals: Set<string>;
+  refTypeIdentifier: string | null;
+  removableDefineForwardRefImports: ImportDeclaration[];
+  removableDefineForwardRefSpecifiers: Array<{
     declaration: ImportDeclaration;
     specifierStart: number;
     specifierEnd: number;
@@ -48,7 +58,9 @@ interface ScriptScope {
 }
 
 export interface ScriptTransformMeta {
-  hasUseForwardedRef: boolean;
+  hasDefineForwardRef: boolean;
+  templateRefs: LocalForwardedRef[];
+  propsIdentifier: string | null;
 }
 
 export function transformScriptSetup(
@@ -56,63 +68,65 @@ export function transformScriptSetup(
   s: MagicString,
   options: TransformScriptSetupOptions,
 ): ScriptTransformMeta {
-  if (!code.includes(USE_FORWARDED_REF)) {
-    return { hasUseForwardedRef: false };
+  if (!code.includes(DEFINE_FORWARD_REF)) {
+    return emptyMeta();
   }
 
   const ast = parseScript(code);
   const scope = collectScriptScope(ast);
-
-  if (scope.forwardedRefLocals.size === 0) {
-    return { hasUseForwardedRef: false };
-  }
-
-  const bindings = collectForwardedRefBindings(code, ast, scope.forwardedRefLocals);
+  const bindings = collectDefineForwardRefBindings(code, ast, scope);
 
   if (bindings.length === 0) {
-    return { hasUseForwardedRef: false };
+    return emptyMeta();
   }
 
+  const forwardingBindings = bindings.filter((binding) => binding.templateRef);
+  const localForwardingBindings = forwardingBindings.filter((binding) => binding.bindingIdentifier);
+  const exposedProperties = bindings.flatMap((binding) => binding.exposeProperties);
   const defineProps = collectDefineProps(ast)[0] ?? null;
   const defineExpose = collectDefineExpose(ast)[0] ?? null;
   const propsIdentifier = defineProps?.propsIdentifier ?? choosePropsIdentifier(scope.bindings);
   const customRefIdentifier =
     scope.customRefIdentifier ?? chooseCustomRefIdentifier(scope.bindings);
-  const forwardedRefTypeIdentifier =
-    scope.forwardedRefTypeIdentifier ?? chooseForwardedRefTypeIdentifier(scope.bindings);
-  const refType = buildRefType(bindings, forwardedRefTypeIdentifier);
-  const propShape = `{ ${FORWARDED_REF_PROP_NAME}?: ${refType} | ((value: any) => void) }`;
-  const exposedProperties = bindings.flatMap((binding) => binding.exposeProperties);
-
-  removeForwardedRefImports(s, options.offset, scope);
-
-  if (!scope.forwardedRefTypeIdentifier) {
-    s.prependLeft(
-      options.offset,
-      `\nimport type { ForwardedRef${forwardedRefTypeIdentifier === "ForwardedRef" ? "" : ` as ${forwardedRefTypeIdentifier}`} } from "vue-refx"\n`,
-    );
-  }
-
-  if (!scope.customRefIdentifier) {
-    s.prependLeft(
-      options.offset,
-      `\nimport { customRef${customRefIdentifier === "customRef" ? "" : ` as ${customRefIdentifier}`} } from "vue"\n`,
-    );
-  }
-
+  const refTypeIdentifier = scope.refTypeIdentifier ?? chooseRefTypeIdentifier(scope.bindings);
   const insertionPoint = Math.min(...bindings.map((binding) => binding.statementStart));
   const insertions: string[] = [];
 
-  if (defineProps) {
-    mergeDefinePropsType(code, s, options.offset, defineProps.call, propShape);
-  } else {
-    insertions.push(`const ${propsIdentifier} = defineProps<${propShape}>()`);
+  removeDefineForwardRefImports(s, options.offset, scope);
+
+  if (forwardingBindings.length > 0) {
+    const propShape = `{ ${FORWARDED_REF_PROP_NAME}?: ${buildRefType(forwardingBindings, refTypeIdentifier)} | ((value: any) => void) }`;
+
+    if (localForwardingBindings.length > 0 && !scope.refTypeIdentifier) {
+      s.prependLeft(
+        options.offset,
+        `\nimport type { Ref${refTypeIdentifier === "Ref" ? "" : ` as ${refTypeIdentifier}`} } from "vue"\n`,
+      );
+    }
+
+    if (localForwardingBindings.length > 0 && !scope.customRefIdentifier) {
+      s.prependLeft(
+        options.offset,
+        `\nimport { customRef${customRefIdentifier === "customRef" ? "" : ` as ${customRefIdentifier}`} } from "vue"\n`,
+      );
+    }
+
+    if (defineProps) {
+      mergeDefinePropsType(code, s, options.offset, defineProps.call, propShape);
+    } else {
+      insertions.push(`const ${propsIdentifier} = defineProps<${propShape}>()`);
+    }
   }
+
+  const exposeReplacementBinding =
+    exposedProperties.length > 0 && !defineExpose
+      ? (bindings.find((binding) => !binding.templateRef && binding.isExpressionStatement) ?? null)
+      : null;
 
   if (exposedProperties.length > 0) {
     if (defineExpose) {
       mergeDefineExpose(code, s, options.offset, defineExpose.call, exposedProperties);
-    } else {
+    } else if (!exposeReplacementBinding) {
       insertions.push(`defineExpose(${buildExposeObjectSource(exposedProperties)})`);
     }
   }
@@ -122,57 +136,169 @@ export function transformScriptSetup(
   }
 
   for (const binding of bindings) {
-    s.overwrite(
-      options.offset + assertPosition(binding.call.start),
-      options.offset + assertPosition(binding.call.end),
-      buildForwardedRefSource(
+    if (binding.templateRef) {
+      const source = buildForwardedRefSource(
         binding.typeSource,
         propsIdentifier,
         customRefIdentifier,
-        forwardedRefTypeIdentifier,
-      ),
+        refTypeIdentifier,
+      );
+
+      if (binding.isVariableInitializer) {
+        s.overwrite(
+          options.offset + assertPosition(binding.call.start),
+          options.offset + assertPosition(binding.call.end),
+          source,
+        );
+      } else if (binding === exposeReplacementBinding) {
+        s.overwrite(
+          options.offset + assertPosition(binding.call.start),
+          options.offset + assertPosition(binding.call.end),
+          `defineExpose(${buildExposeObjectSource(exposedProperties)})`,
+        );
+      } else if (binding.isExpressionStatement) {
+        s.remove(options.offset + binding.statementStart, options.offset + binding.statementEnd);
+      } else {
+        s.overwrite(
+          options.offset + assertPosition(binding.call.start),
+          options.offset + assertPosition(binding.call.end),
+          "undefined",
+        );
+      }
+      continue;
+    }
+
+    if (binding === exposeReplacementBinding) {
+      s.overwrite(
+        options.offset + assertPosition(binding.call.start),
+        options.offset + assertPosition(binding.call.end),
+        `defineExpose(${buildExposeObjectSource(exposedProperties)})`,
+      );
+      continue;
+    }
+
+    if (binding.isExpressionStatement) {
+      s.remove(options.offset + binding.statementStart, options.offset + binding.statementEnd);
+      continue;
+    }
+
+    s.overwrite(
+      options.offset + assertPosition(binding.call.start),
+      options.offset + assertPosition(binding.call.end),
+      "undefined",
     );
   }
 
-  return { hasUseForwardedRef: true };
+  return {
+    hasDefineForwardRef: true,
+    propsIdentifier: forwardingBindings.length > 0 ? propsIdentifier : null,
+    templateRefs: forwardingBindings.map((binding) => ({
+      name: binding.templateRef ?? "",
+      binding: binding.bindingIdentifier,
+    })),
+  };
 }
 
-function collectForwardedRefBindings(
+function emptyMeta(): ScriptTransformMeta {
+  return {
+    hasDefineForwardRef: false,
+    templateRefs: [],
+    propsIdentifier: null,
+  };
+}
+
+function collectDefineForwardRefBindings(
   code: string,
   ast: File,
-  forwardedRefLocals: Set<string>,
-): ForwardedRefBinding[] {
-  const bindings: ForwardedRefBinding[] = [];
+  scope: ScriptScope,
+): DefineForwardRefBinding[] {
+  const bindings: DefineForwardRefBinding[] = [];
 
   traverse(ast, {
-    VariableDeclarator(path) {
+    CallExpression(path) {
       const node = path.node;
 
-      if (
-        !node.init ||
-        node.init.type !== "CallExpression" ||
-        !isUseForwardedRefCall(node.init, forwardedRefLocals)
-      ) {
+      if (!isDefineForwardRefCall(path, scope.defineForwardRefLocals)) {
         return;
       }
 
-      if (node.id.type !== "Identifier") {
-        throw new Error("useForwardedRef() must be assigned to an identifier.");
-      }
-
-      const declaration = path.findParent((parent) => parent.isVariableDeclaration());
-      const statementStart = declaration?.node.start ?? node.start;
+      const overload = parseDefineForwardRefOverload(code, node);
+      const declarator =
+        path.parentPath?.isVariableDeclarator() && path.parentPath.node.init === node
+          ? (path.parentPath as NodePath<VariableDeclarator>)
+          : null;
+      const expressionStatement = path.findParent((parent) => parent.isExpressionStatement());
+      const statement = declarator?.parentPath?.node ?? expressionStatement?.node ?? node;
+      const bindingIdentifier = overload.templateRef
+        ? getForwardedRefBindingIdentifier(declarator, Boolean(expressionStatement))
+        : null;
 
       bindings.push({
-        call: node.init,
-        statementStart: assertPosition(statementStart),
-        typeSource: getUseForwardedRefTypeSource(code, node.init),
-        exposeProperties: getFactoryExposeProperties(code, node.init),
+        call: node,
+        statementStart: assertPosition(statement.start),
+        statementEnd: getStatementEnd(code, assertPosition(statement.end)),
+        templateRef: overload.templateRef,
+        bindingIdentifier,
+        typeSource: getDefineForwardRefTypeSource(code, node),
+        exposeProperties: overload.exposeProperties,
+        isVariableInitializer: Boolean(declarator),
+        isExpressionStatement: Boolean(expressionStatement),
       });
     },
   });
 
   return bindings;
+}
+
+function parseDefineForwardRefOverload(
+  code: string,
+  call: CallExpression,
+): {
+  templateRef: string | null;
+  exposeProperties: string[];
+} {
+  const first = call.arguments[0];
+
+  if (!first) {
+    throw new Error("defineForwardRef() requires a template ref name or expose factory.");
+  }
+
+  if (first.type === "StringLiteral") {
+    return {
+      templateRef: first.value,
+      exposeProperties: getFactoryExposeProperties(code, call.arguments[1]),
+    };
+  }
+
+  if (first.type === "ArrowFunctionExpression" || first.type === "FunctionExpression") {
+    return {
+      templateRef: null,
+      exposeProperties: getFactoryExposeProperties(code, first),
+    };
+  }
+
+  throw new Error("defineForwardRef() expects a string literal or expose factory.");
+}
+
+function getForwardedRefBindingIdentifier(
+  declarator: NodePath<VariableDeclarator> | null,
+  isExpressionStatement: boolean,
+): string | null {
+  if (declarator) {
+    const id = declarator.node.id;
+
+    if (id.type !== "Identifier") {
+      throw new Error("defineForwardRef() must be assigned to an identifier.");
+    }
+
+    return id.name;
+  }
+
+  if (isExpressionStatement) {
+    return null;
+  }
+
+  throw new Error("defineForwardRef() must be assigned to an identifier or used as a statement.");
 }
 
 function collectDefineProps(ast: File): DefinePropsCall[] {
@@ -227,10 +353,11 @@ function collectDefineExpose(ast: File): DefineExposeCall[] {
 function collectScriptScope(ast: File): ScriptScope {
   const bindings = new Set<string>();
   let customRefIdentifier: string | null = null;
-  const forwardedRefLocals = new Set<string>();
-  let forwardedRefTypeIdentifier: string | null = null;
-  const removableForwardedRefImports: ImportDeclaration[] = [];
-  const removableForwardedRefSpecifiers: ScriptScope["removableForwardedRefSpecifiers"] = [];
+  const defineForwardRefLocals = new Set<string>();
+  let refTypeIdentifier: string | null = null;
+  const removableDefineForwardRefImports: ImportDeclaration[] = [];
+  const removableDefineForwardRefSpecifiers: ScriptScope["removableDefineForwardRefSpecifiers"] =
+    [];
 
   traverse(ast, {
     Program(path) {
@@ -248,27 +375,21 @@ function collectScriptScope(ast: File): ScriptScope {
       if (node.source.value === "vue") {
         for (const specifier of node.specifiers) {
           if (
-            node.importKind !== "type" &&
             specifier.type === "ImportSpecifier" &&
             specifier.imported.type === "Identifier" &&
-            specifier.imported.name === "customRef" &&
-            specifier.local.type === "Identifier" &&
-            specifier.importKind !== "type"
-          ) {
-            customRefIdentifier = specifier.local.name;
-          }
-        }
-      }
-
-      if (isForwardedRefImportSource(node.source.value)) {
-        for (const specifier of node.specifiers) {
-          if (
-            specifier.type === "ImportSpecifier" &&
-            specifier.imported.type === "Identifier" &&
-            specifier.imported.name === "ForwardedRef" &&
             specifier.local.type === "Identifier"
           ) {
-            forwardedRefTypeIdentifier = specifier.local.name;
+            if (
+              node.importKind !== "type" &&
+              specifier.imported.name === "customRef" &&
+              specifier.importKind !== "type"
+            ) {
+              customRefIdentifier = specifier.local.name;
+            }
+
+            if (specifier.imported.name === "Ref") {
+              refTypeIdentifier = specifier.local.name;
+            }
           }
         }
       }
@@ -277,29 +398,29 @@ function collectScriptScope(ast: File): ScriptScope {
         return;
       }
 
-      const forwardedRefSpecifiers = node.specifiers.filter(
+      const defineForwardRefSpecifiers = node.specifiers.filter(
         (specifier) =>
           specifier.type === "ImportSpecifier" &&
           specifier.imported.type === "Identifier" &&
-          specifier.imported.name === USE_FORWARDED_REF &&
+          specifier.imported.name === DEFINE_FORWARD_REF &&
           specifier.importKind !== "type",
       );
 
-      for (const specifier of forwardedRefSpecifiers) {
-        forwardedRefLocals.add(specifier.local.name);
+      for (const specifier of defineForwardRefSpecifiers) {
+        defineForwardRefLocals.add(specifier.local.name);
       }
 
-      if (forwardedRefSpecifiers.length === 0) {
+      if (defineForwardRefSpecifiers.length === 0) {
         return;
       }
 
-      if (forwardedRefSpecifiers.length === node.specifiers.length) {
-        removableForwardedRefImports.push(node);
+      if (defineForwardRefSpecifiers.length === node.specifiers.length) {
+        removableDefineForwardRefImports.push(node);
         return;
       }
 
-      for (const specifier of forwardedRefSpecifiers) {
-        removableForwardedRefSpecifiers.push({
+      for (const specifier of defineForwardRefSpecifiers) {
+        removableDefineForwardRefSpecifiers.push({
           declaration: node,
           specifierStart: assertPosition(specifier.start),
           specifierEnd: assertPosition(specifier.end),
@@ -311,10 +432,10 @@ function collectScriptScope(ast: File): ScriptScope {
   return {
     bindings,
     customRefIdentifier,
-    forwardedRefLocals,
-    forwardedRefTypeIdentifier,
-    removableForwardedRefImports,
-    removableForwardedRefSpecifiers,
+    defineForwardRefLocals,
+    refTypeIdentifier,
+    removableDefineForwardRefImports,
+    removableDefineForwardRefSpecifiers,
   };
 }
 
@@ -381,6 +502,10 @@ function appendObjectProperties(
   object: ObjectExpression,
   properties: string[],
 ): void {
+  if (properties.length === 0) {
+    return;
+  }
+
   const objectStart = assertPosition(object.start);
   const objectEnd = assertPosition(object.end);
 
@@ -410,6 +535,10 @@ function appendObjectProperties(
 }
 
 function buildExposeObjectSource(properties: string[]): string {
+  if (properties.length === 0) {
+    return "{}";
+  }
+
   return `{\n  ${properties.join(",\n  ")}\n}`;
 }
 
@@ -419,12 +548,12 @@ function getLineIndent(code: string, position: number): string {
   return line.match(/^\s*/)?.[0] ?? "  ";
 }
 
-function removeForwardedRefImports(s: MagicString, offset: number, scope: ScriptScope): void {
-  for (const declaration of scope.removableForwardedRefImports) {
+function removeDefineForwardRefImports(s: MagicString, offset: number, scope: ScriptScope): void {
+  for (const declaration of scope.removableDefineForwardRefImports) {
     s.remove(offset + assertPosition(declaration.start), offset + assertPosition(declaration.end));
   }
 
-  for (const specifier of scope.removableForwardedRefSpecifiers) {
+  for (const specifier of scope.removableDefineForwardRefSpecifiers) {
     const specifierStart = specifier.specifierStart;
     const specifierEnd = specifier.specifierEnd;
     const declaration = specifier.declaration;
@@ -445,7 +574,7 @@ function removeForwardedRefImports(s: MagicString, offset: number, scope: Script
   }
 }
 
-function getUseForwardedRefTypeSource(code: string, call: CallExpression): string | null {
+function getDefineForwardRefTypeSource(code: string, call: CallExpression): string | null {
   const typeParameters = call.typeParameters as TSTypeParameterInstantiation | undefined;
 
   if (!typeParameters || typeParameters.params.length === 0) {
@@ -460,9 +589,10 @@ function getUseForwardedRefTypeSource(code: string, call: CallExpression): strin
     .trim();
 }
 
-function getFactoryExposeProperties(code: string, call: CallExpression): string[] {
-  const factory = call.arguments[0];
-
+function getFactoryExposeProperties(
+  code: string,
+  factory: CallExpression["arguments"][number] | undefined,
+): string[] {
   if (
     !factory ||
     (factory.type !== "ArrowFunctionExpression" && factory.type !== "FunctionExpression")
@@ -499,25 +629,27 @@ function getFactoryObjectExpression(
   return null;
 }
 
-function buildRefType(bindings: ForwardedRefBinding[], forwardedRefTypeIdentifier: string): string {
+function buildRefType(bindings: DefineForwardRefBinding[], refTypeIdentifier: string): string {
   const typeSources = [...new Set(bindings.map((binding) => binding.typeSource).filter(Boolean))];
 
   if (typeSources.length === 0) {
-    return `${forwardedRefTypeIdentifier}<any>`;
+    return `${refTypeIdentifier}<any | null>`;
   }
 
-  return typeSources.map((type) => `${forwardedRefTypeIdentifier}<${type}>`).join(" | ");
+  return typeSources.map((type) => `${refTypeIdentifier}<${type} | null>`).join(" | ");
 }
 
 function buildForwardedRefSource(
   typeSource: string | null,
   propsIdentifier: string,
   customRefIdentifier: string,
-  forwardedRefTypeIdentifier: string,
+  refTypeIdentifier: string,
 ): string {
-  const forwardedRefType = `${forwardedRefTypeIdentifier}<${typeSource ?? "any"}>`;
-  return `${customRefIdentifier}<${typeSource ?? "any"} | null>((track, trigger) => {
-  let value = null as ${typeSource ?? "any"} | null
+  const valueType = `${typeSource ?? "any"} | null`;
+  const forwardedRefType = `${refTypeIdentifier}<${valueType}>`;
+
+  return `${customRefIdentifier}<${valueType}>((track, trigger) => {
+  let value = null as ${valueType}
 
   return {
     get() {
@@ -555,16 +687,16 @@ function chooseCustomRefIdentifier(bindings: Set<string>): string {
   return candidate;
 }
 
-function chooseForwardedRefTypeIdentifier(bindings: Set<string>): string {
-  if (!bindings.has("ForwardedRef")) {
-    return "ForwardedRef";
+function chooseRefTypeIdentifier(bindings: Set<string>): string {
+  if (!bindings.has("Ref")) {
+    return "Ref";
   }
 
   let index = 1;
-  let candidate = "__ForwardedRef";
+  let candidate = "__VueRef";
 
   while (bindings.has(candidate)) {
-    candidate = `__ForwardedRef${index}`;
+    candidate = `__VueRef${index}`;
     index += 1;
   }
 
@@ -587,12 +719,29 @@ function choosePropsIdentifier(bindings: Set<string>): string {
   return candidate;
 }
 
-function isUseForwardedRefCall(node: CallExpression, forwardedRefLocals: Set<string>): boolean {
-  return node.callee.type === "Identifier" && forwardedRefLocals.has(node.callee.name);
+function isDefineForwardRefCall(
+  path: NodePath<CallExpression>,
+  defineForwardRefLocals: Set<string>,
+): boolean {
+  const callee = path.node.callee;
+
+  if (callee.type !== "Identifier") {
+    return false;
+  }
+
+  if (defineForwardRefLocals.has(callee.name)) {
+    return true;
+  }
+
+  return callee.name === DEFINE_FORWARD_REF && !path.scope.hasBinding(DEFINE_FORWARD_REF);
 }
 
 function isForwardedRefImportSource(source: string): boolean {
   return FORWARDED_REF_IMPORT_SOURCES.has(source);
+}
+
+function getStatementEnd(code: string, end: number): number {
+  return code[end] === ";" ? end + 1 : end;
 }
 
 function assertPosition(value: number | null | undefined): number {

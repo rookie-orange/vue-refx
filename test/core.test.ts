@@ -1,201 +1,158 @@
 import type { Ref } from "vue";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import type { ForwardedRef } from "../packages/runtime/src";
+import { defineForwardRef } from "../packages/runtime/src";
 import { analyzeVueSfc, getVueComponentImports, transformVueSfc } from "../packages/core/src";
 
-describe("script setup forwarded ref transform", () => {
-  it("injects defineProps and replaces useForwardedRef with generated props access", () => {
+describe("script setup defineForwardRef transform", () => {
+  it("forwards a template ref by name", () => {
     const result = transformVueSfc(`
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
+import { defineForwardRef } from "vue-refx"
 
-const ref = useForwardedRef<HTMLInputElement>()
+defineForwardRef("input")
 </script>
+<template>
+  <input ref="input" />
+</template>
 `);
 
     expect(result.hasChanged).toBe(true);
-    expect(result.hasUseForwardedRef).toBe(true);
-    expect(result.code).toContain(`import type { ForwardedRef } from "vue-refx"`);
+    expect(result.hasDefineForwardRef).toBe(true);
+    expect(result.code).toContain(
+      `const props = defineProps<{ __forwarded_ref__?: Ref<any | null> | ((value: any) => void) }>()`,
+    );
+    expect(result.code).toContain(`:ref="props.__forwarded_ref__"`);
+    expect(result.code).not.toContain("defineForwardRef");
+    expect(result.code).not.toContain(`import { defineForwardRef } from "vue-refx"`);
+  });
+
+  it("returns a typed Ref when assigned", () => {
+    const result = transformVueSfc(`
+<script setup lang="ts">
+import { defineForwardRef } from "vue-refx"
+
+const input = defineForwardRef<HTMLInputElement>("input")
+</script>
+<template>
+  <input ref="input" />
+</template>
+`);
+
+    expect(result.code).toContain(`import type { Ref } from "vue"`);
     expect(result.code).toContain(`import { customRef } from "vue"`);
-    expect(result.code).toContain(
-      `const props = defineProps<{ __forwarded_ref__?: ForwardedRef<HTMLInputElement> | ((value: any) => void) }>()`,
-    );
-    expect(result.code).toContain(`const ref = customRef<HTMLInputElement | null>`);
-    expect(result.code).toContain(`const target = props.__forwarded_ref__`);
-    expect(result.code).toContain(`target.value = nextValue`);
-    expect(result.code).not.toContain("useForwardedRef<HTMLInputElement>()");
-    expect(result.code).not.toContain(`import { useForwardedRef } from "vue-refx"`);
+    expect(result.code).toContain(`const input = customRef<HTMLInputElement | null>`);
+    expect(result.code).toContain(`as Ref<HTMLInputElement | null>`);
+    expect(result.code).toContain(`:ref="(value) => input = value"`);
+    expect(result.code).not.toContain(`defineForwardRef<HTMLInputElement>("input")`);
   });
 
-  it("does not transform useForwardedRef without an import", () => {
+  it("generates defineExpose for expose-only overload", () => {
     const result = transformVueSfc(`
 <script setup lang="ts">
-const ref = useForwardedRef<HTMLInputElement>()
+import { defineForwardRef } from "vue-refx"
+
+function focus() {}
+
+defineForwardRef(() => ({
+  focus,
+}))
 </script>
+<template>
+  <input />
+</template>
 `);
 
-    expect(result.hasChanged).toBe(false);
-    expect(result.hasUseForwardedRef).toBe(false);
-    expect(result.code).toContain("useForwardedRef<HTMLInputElement>()");
+    expect(result.code).toContain(`defineExpose({\n  focus\n})`);
+    expect(result.code).not.toContain("defineForwardRef");
+    expect(result.code).not.toContain("__forwarded_ref__");
   });
 
-  it("merges with an existing defineProps declaration", () => {
+  it("forwards a template ref and exposes methods", () => {
     const result = transformVueSfc(`
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
-
-type Props = { label: string }
-const props = defineProps<Props>()
-const inputRef = useForwardedRef()
-</script>
-`);
-
-    expect(result.code).toContain(
-      `defineProps<Props & { __forwarded_ref__?: ForwardedRef<any> | ((value: any) => void) }>()`,
-    );
-    expect(result.code).toContain(`const inputRef = customRef<any | null>`);
-    expect((result.code.match(/defineProps/g) ?? []).length).toBe(1);
-  });
-
-  it("keeps the local variable name and generic type", () => {
-    const result = transformVueSfc(`
-<script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
-
-const inputRef = useForwardedRef<HTMLDivElement>()
-</script>
-`);
-
-    expect(result.code).toContain(`const inputRef = customRef<HTMLDivElement | null>`);
-    expect(result.code).toContain(`ForwardedRef<HTMLDivElement>`);
-  });
-
-  it("recognizes import aliases", () => {
-    const result = transformVueSfc(`
-<script setup lang="ts">
-import { useForwardedRef as forwarded } from "vue-refx"
-
-const inputRef = forwarded<HTMLInputElement>()
-</script>
-`);
-
-    expect(result.code).toContain(`const inputRef = customRef<HTMLInputElement | null>`);
-    expect(result.code).toContain(`ForwardedRef<HTMLInputElement>`);
-    expect(result.code).not.toContain("forwarded<HTMLInputElement>()");
-  });
-
-  it("aliases the generated ForwardedRef import when the name is already bound", () => {
-    const result = transformVueSfc(`
-<script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
-
-type ForwardedRef = { local: true }
-const inputRef = useForwardedRef<HTMLInputElement>()
-</script>
-`);
-
-    expect(result.code).toContain(`import type { ForwardedRef as __ForwardedRef } from "vue-refx"`);
-    expect(result.code).toContain(`__ForwardedRef<HTMLInputElement>`);
-  });
-
-  it("reuses existing customRef imports and aliases generated ones when needed", () => {
-    const reused = transformVueSfc(`
-<script setup lang="ts">
-import { customRef as vueCustomRef } from "vue"
-import { useForwardedRef } from "vue-refx"
-
-const inputRef = useForwardedRef<HTMLInputElement>()
-</script>
-`);
-
-    expect(reused.code).toContain(`const inputRef = vueCustomRef<HTMLInputElement | null>`);
-    expect(reused.code).not.toContain(`import { customRef } from "vue"`);
-
-    const aliased = transformVueSfc(`
-<script setup lang="ts">
-import type { customRef } from "vue"
-import { useForwardedRef } from "vue-refx"
-
-const inputRef = useForwardedRef<HTMLInputElement>()
-</script>
-`);
-
-    expect(aliased.code).toContain(`import { customRef as __customRef } from "vue"`);
-    expect(aliased.code).toContain(`const inputRef = __customRef<HTMLInputElement | null>`);
-  });
-
-  it("exposes forwarded refs like Vue refs", () => {
-    expectTypeOf<ForwardedRef<HTMLInputElement>>().toMatchTypeOf<Ref<HTMLInputElement | null>>();
-    expectTypeOf<
-      ForwardedRef<HTMLInputElement>["value"]
-    >().toEqualTypeOf<HTMLInputElement | null>();
-
-    type PublicKeys = keyof ForwardedRef<HTMLInputElement>;
-    expectTypeOf<"value">().toMatchTypeOf<PublicKeys>();
-    expectTypeOf<"__forwardedRefTarget">().not.toMatchTypeOf<PublicKeys>();
-  });
-
-  it("creates defineExpose from the factory API", () => {
-    const result = transformVueSfc(`
-<script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
+import { defineForwardRef } from "vue-refx"
 
 function focus() {}
 function blur() {}
 
-const ref = useForwardedRef(() => ({
+defineForwardRef("input", () => ({
   focus,
-  blur
+  blur,
 }))
 </script>
+<template>
+  <input ref="input" />
+</template>
 `);
 
     expect(result.code).toContain(`defineExpose({\n  focus,\n  blur\n})`);
-    expect(result.code).toContain(`const ref = customRef<any | null>`);
-    expect(result.code).not.toContain("useForwardedRef(()");
+    expect(result.code).toContain(
+      `const props = defineProps<{ __forwarded_ref__?: Ref<any | null> | ((value: any) => void) }>()`,
+    );
+    expect(result.code).toContain(`:ref="props.__forwarded_ref__"`);
   });
 
-  it("merges factory expose entries into an existing defineExpose object", () => {
+  it("merges expose-only overload into an existing defineExpose object", () => {
     const result = transformVueSfc(`
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
+import { defineForwardRef } from "vue-refx"
 
 defineExpose({
   open,
-})
-
-const ref = useForwardedRef(() => ({
-  close,
-}))
-</script>
-`);
-
-    expect(result.code).toContain(`defineExpose({\n  open,\n  close\n})`);
-    expect((result.code.match(/defineExpose/g) ?? []).length).toBe(1);
-  });
-
-  it("preserves spread entries when merging defineExpose", () => {
-    const result = transformVueSfc(`
-<script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
-
-defineExpose({
   ...methods,
 })
 
-const ref = useForwardedRef(() => ({
+defineForwardRef(() => ({
   close,
 }))
 </script>
+<template>
+  <input />
+</template>
 `);
 
-    expect(result.code).toContain(`defineExpose({\n  ...methods,\n  close\n})`);
+    expect(result.code).toContain(`defineExpose({\n  open,\n  ...methods,\n  close\n})`);
     expect((result.code.match(/defineExpose/g) ?? []).length).toBe(1);
+    expect(result.code).not.toContain("defineForwardRef");
+  });
+
+  it("throws when the named template ref cannot be found", () => {
+    expect(() =>
+      transformVueSfc(`
+<script setup lang="ts">
+import { defineForwardRef } from "vue-refx"
+
+defineForwardRef("input")
+</script>
+<template>
+  <textarea ref="message" />
+</template>
+`),
+    ).toThrow(`Cannot find template ref "input".`);
+  });
+
+  it("throws when a forwarded ref component has no template", () => {
+    expect(() =>
+      transformVueSfc(`
+<script setup lang="ts">
+import { defineForwardRef } from "vue-refx"
+
+defineForwardRef("input")
+</script>
+`),
+    ).toThrow(`Cannot find template ref "input".`);
+  });
+
+  it("supports generic inference from runtime declarations", () => {
+    type Input = ReturnType<typeof defineForwardRef<HTMLInputElement>>;
+
+    expectTypeOf<Input>().toEqualTypeOf<Ref<HTMLInputElement | null>>();
+    expectTypeOf<Input["value"]>().toEqualTypeOf<HTMLInputElement | null>();
   });
 });
 
 describe("template transform", () => {
-  it("moves component refs to __forwarded_ref__ only for known forwarded-ref components", () => {
+  it("moves component refs to __forwarded_ref__ only for known defineForwardRef components", () => {
     const result = transformVueSfc(
       `
 <script setup lang="ts">
@@ -241,22 +198,6 @@ import C from "./C.vue"
     expect(result.code).not.toContain("__forwarded_ref__");
   });
 
-  it("does not inject when the target component is not marked as a forwarded-ref user", () => {
-    const result = transformVueSfc(
-      `
-<template>
-  <MyInput ref="input" />
-</template>
-`,
-      {
-        forwardedRefComponents: [],
-      },
-    );
-
-    expect(result.hasChanged).toBe(false);
-    expect(result.code).not.toContain("__forwarded_ref__");
-  });
-
   it("matches kebab-case component tags", () => {
     const result = transformVueSfc(
       `
@@ -275,17 +216,20 @@ import C from "./C.vue"
 });
 
 describe("analysis helpers", () => {
-  it("detects imported useForwardedRef usage and vue imports", () => {
+  it("detects imported defineForwardRef usage and vue imports", () => {
     const code = `
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
+import { defineForwardRef } from "vue-refx"
 import MyInput from "./MyInput.vue"
 
-const ref = useForwardedRef<HTMLInputElement>()
+defineForwardRef("input")
 </script>
+<template>
+  <input ref="input" />
+</template>
 `;
 
-    expect(analyzeVueSfc(code).hasUseForwardedRef).toBe(true);
+    expect(analyzeVueSfc(code).hasDefineForwardRef).toBe(true);
     expect(getVueComponentImports(code)).toEqual([
       {
         local: "MyInput",
@@ -297,10 +241,13 @@ const ref = useForwardedRef<HTMLInputElement>()
   it("keeps source maps disabled by default and available when requested", () => {
     const source = `
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
+import { defineForwardRef } from "vue-refx"
 
-const ref = useForwardedRef<HTMLInputElement>()
+const input = defineForwardRef<HTMLInputElement>("input")
 </script>
+<template>
+  <input ref="input" />
+</template>
 `;
     const withoutMap = transformVueSfc(source, { filename: "MyInput.vue" });
     const withMap = transformVueSfc(source, {

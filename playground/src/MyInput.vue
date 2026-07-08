@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
+import { defineForwardRef } from "vue-refx";
 
-const ref = useForwardedRef<HTMLInputElement>();
+defineForwardRef("input");
 </script>
 
 <template>
-  <input :ref="ref" placeholder="Focus is forwarded from the parent ref" />
+  <input ref="input" placeholder="Focus is forwarded from the parent ref" />
 </template>
 
 <style scoped>

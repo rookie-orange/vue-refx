@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
-import { useForwardedRef } from "vue-refx";
-
-type ForwardedRefTarget<T> = { value: T | null } | ((value: T | null) => void) | null | undefined;
+import { computed, ref } from "vue";
+import { defineForwardRef } from "vue-refx";
 
 const value = ref("Compile-time factory");
 const focused = ref(false);
 const lastAction = ref("mounted");
-const inputEl = ref<HTMLInputElement | null>(null);
 
 function focus() {
   inputEl.value?.focus();
@@ -40,7 +37,7 @@ function getValue() {
   return value.value;
 }
 
-const forwardedInput = useForwardedRef<HTMLInputElement>(() => ({
+const inputEl = defineForwardRef<HTMLInputElement>("input", () => ({
   focus,
   blur,
   select,
@@ -49,36 +46,12 @@ const forwardedInput = useForwardedRef<HTMLInputElement>(() => ({
   getValue,
 }));
 
-const forwardedInputTarget = forwardedInput as unknown as ForwardedRefTarget<HTMLInputElement>;
-
 const strength = computed(() => Math.min(100, Math.max(12, value.value.length * 7)));
-
-function bindInput(element: Element | null) {
-  const nextInput = element instanceof HTMLInputElement ? element : null;
-
-  inputEl.value = nextInput;
-  assignForwardedRef(forwardedInputTarget, nextInput);
-}
-
-function assignForwardedRef<T>(target: ForwardedRefTarget<T>, nextValue: T | null) {
-  if (typeof target === "function") {
-    target(nextValue);
-    return;
-  }
-
-  if (target) {
-    target.value = nextValue;
-  }
-}
 
 function setFocused(nextFocused: boolean) {
   focused.value = nextFocused;
   lastAction.value = nextFocused ? "focus event" : "blur event";
 }
-
-onBeforeUnmount(() => {
-  assignForwardedRef(forwardedInputTarget, null);
-});
 </script>
 
 <template>
@@ -91,7 +64,7 @@ onBeforeUnmount(() => {
     <label class="field-shell">
       <span>Command input</span>
       <input
-        :ref="bindInput"
+        ref="input"
         v-model="value"
         placeholder="Type a forwarded value"
         @blur="setFocused(false)"

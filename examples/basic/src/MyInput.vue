@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
+import { defineForwardRef } from "vue-refx";
 
-const ref = useForwardedRef<HTMLInputElement>();
+defineForwardRef("input");
 </script>
 
 <template>
-  <input ref="ref" />
+  <input ref="input" />
 </template>

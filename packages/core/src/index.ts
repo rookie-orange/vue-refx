@@ -1,4 +1,8 @@
-export { analyzeVueSfc, descriptorUsesForwardedRef, scriptUsesForwardedRef } from "./analyze";
+export {
+  analyzeVueSfc,
+  descriptorUsesDefineForwardRef,
+  scriptUsesDefineForwardRef,
+} from "./analyze";
 export {
   collectVueComponentImports,
   collectVueComponentImportsFromDescriptor,

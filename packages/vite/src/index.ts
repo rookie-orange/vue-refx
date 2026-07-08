@@ -20,7 +20,7 @@ type FilterPattern = RegExp | string | Array<RegExp | string>;
 
 interface CachedAnalysis {
   mtimeMs: number;
-  hasUseForwardedRef: boolean;
+  hasDefineForwardRef: boolean;
 }
 
 export const unplugin = createUnplugin<ForwardRefOptions | undefined>((options = {}) => {
@@ -37,23 +37,23 @@ export const unplugin = createUnplugin<ForwardRefOptions | undefined>((options =
       const cached = analysisCache.get(normalized);
 
       if (cached && cached.mtimeMs === stat.mtimeMs) {
-        return cached.hasUseForwardedRef;
+        return cached.hasDefineForwardRef;
       }
 
       const code = fallbackCode ?? (await fs.readFile(normalized, "utf8"));
-      const hasUseForwardedRef = analyzeVueSfc(code).hasUseForwardedRef;
+      const hasDefineForwardRef = analyzeVueSfc(code).hasDefineForwardRef;
       analysisCache.set(normalized, {
         mtimeMs: stat.mtimeMs,
-        hasUseForwardedRef,
+        hasDefineForwardRef,
       });
 
-      return hasUseForwardedRef;
+      return hasDefineForwardRef;
     } catch {
       if (fallbackCode == null) {
         return false;
       }
 
-      return analyzeVueSfc(fallbackCode).hasUseForwardedRef;
+      return analyzeVueSfc(fallbackCode).hasDefineForwardRef;
     }
   }
 
@@ -168,7 +168,7 @@ export const unplugin = createUnplugin<ForwardRefOptions | undefined>((options =
 
       analysisCache.set(normalizePath(cleanId), {
         mtimeMs: await getMtime(cleanId),
-        hasUseForwardedRef: result.hasUseForwardedRef,
+        hasDefineForwardRef: result.hasDefineForwardRef,
       });
 
       if (!result.hasChanged) {

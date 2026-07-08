@@ -25,7 +25,7 @@ describe("vite plugin", () => {
     );
   });
 
-  it("injects template ref props only for imported components that use forwarded refs", async () => {
+  it("injects template ref props only for imported components that use defineForwardRef", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vue-refx-"));
     tempDirs.push(dir);
 
@@ -36,11 +36,11 @@ describe("vite plugin", () => {
     await fs.writeFile(
       child,
       `<script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
+import { defineForwardRef } from "vue-refx"
 
-const ref = useForwardedRef<HTMLInputElement>()
+defineForwardRef("input")
 </script>
-<template><input :ref="ref" /></template>
+<template><input ref="input" /></template>
 `,
     );
     await fs.writeFile(plain, `<template><section /></template>`);
@@ -77,10 +77,11 @@ import Plain from "./Plain.vue"
     const child = path.join(dir, "MyInput.vue");
     const parent = path.join(dir, "Parent.vue");
     const childCode = `<script setup lang="ts">
-import { useForwardedRef } from "vue-refx"
+import { defineForwardRef } from "vue-refx"
 
-const ref = useForwardedRef<HTMLInputElement>()
+defineForwardRef("input")
 </script>
+<template><input ref="input" /></template>
 `;
     const parentCode = `<script setup lang="ts">
 import MyInput from "./MyInput.vue"

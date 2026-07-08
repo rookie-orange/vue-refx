@@ -1,11 +1,9 @@
-import type { Ref, VNodeRef } from "vue";
+import type { Ref } from "vue";
 
-declare const ForwardedRefTarget: unique symbol;
-
-export type ForwardedRef<T = any> = Ref<T | null> & {
-  readonly [ForwardedRefTarget]?: VNodeRef;
-};
-
-export function useForwardedRef<T = any>(_factory?: () => unknown): ForwardedRef<T> {
-  throw new Error("useForwardedRef() must be compiled away by vue-refx.");
-}
+export function defineForwardRef<T = any>(_name: string): Ref<T | null>;
+export function defineForwardRef<T extends object>(_factory: () => T): void;
+export function defineForwardRef<T = any, TExpose extends object = object>(
+  _name: string,
+  _factory: () => TExpose,
+): Ref<T | null>;
+export function defineForwardRef(..._args: unknown[]): any {}

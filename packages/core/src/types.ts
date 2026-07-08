@@ -15,10 +15,10 @@ export interface TransformResult {
   code: string;
   map: SourceMap | null;
   hasChanged: boolean;
-  hasUseForwardedRef: boolean;
+  hasDefineForwardRef: boolean;
 }
 
 export interface AnalyzeResult {
-  hasUseForwardedRef: boolean;
+  hasDefineForwardRef: boolean;
   imports: ComponentImport[];
 }

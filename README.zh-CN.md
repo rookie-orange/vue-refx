@@ -2,47 +2,17 @@
 
 中文 | [English](./README.md)
 
-面向 Vue 的 React 风格 ref 转发。
+面向 Vue 的编译期 ref 转发库，围绕一个宏：
 
-像 React 19 一样在组件之间转发 ref，无需修改 Vue 运行时。
-
-- ⚡ 零运行时
-- ⚡ 不修改 Vue 运行时
-- ⚡ 仅通过编译器转换实现
-- ⚡ 完全兼容现有的 `ref`
-- ⚡ 支持 TypeScript
-
----
-
-## 为什么需要它？
-
-Vue 已经提供了 `defineExpose()`，它很适合用来暴露组件方法。
-
-不过，Vue 没有提供**透明的 ref 转发**。
-
-假设有如下组件层级：
-
-```text
-App
- │
- ▼
-<MyInput ref="input" />
- │
- ▼
-<BaseInput>
- │
- ▼
-<InputWrapper>
- │
- ▼
-<input>
+```ts
+defineForwardRef();
 ```
 
-在今天的 Vue 中，每一层中间组件都需要手动暴露其内部实例或方法。
-
-使用 **vue-refx** 后，ref 可以自然地穿过组件边界，让深层包裹的组件像原生元素一样工作。
-
----
+- 零运行时
+- 不修改 Vue 运行时
+- 仅通过编译器转换实现
+- 支持 TypeScript
+- 兼容 Vue 现有 `ref`
 
 ## 安装
 
@@ -52,32 +22,28 @@ pnpm add vue-refx
 
 ```ts
 import vue from "@vitejs/plugin-vue";
-import VueRefs from "vue-refx/vite";
+import VueRefx from "vue-refx/vite";
 
 export default defineConfig({
-  plugins: [vue(), VueRefs()],
+  plugins: [vue(), VueRefx()],
 });
 ```
 
----
-
-## 基础用法
-
-### 子组件
+## 仅转发模板 ref
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
+import { defineForwardRef } from "vue-refx";
 
-const ref = useForwardedRef<HTMLInputElement>();
+defineForwardRef("input");
 </script>
 
 <template>
-  <input ref="ref" />
+  <input ref="input" />
 </template>
 ```
 
-### 父组件
+父组件可以像使用原生 input 一样使用这个组件：
 
 ```vue
 <script setup lang="ts">
@@ -85,100 +51,45 @@ import { ref } from "vue";
 import MyInput from "./MyInput.vue";
 
 const input = ref<HTMLInputElement | null>(null);
-
-function focus() {
-  input.value?.focus();
-}
 </script>
 
 <template>
   <MyInput ref="input" />
+  <button type="button" @click="input?.focus()">Focus</button>
 </template>
 ```
 
-转发后的 ref 会自动指向原生的 `<input>`。
+## 仅暴露方法
 
----
-
-## 穿过多个组件转发 ref
-
-ref 可以穿过任意数量的包裹组件。
-
-```text
-App
- │
- ▼
-<MyInput ref="input" />
- │
- ▼
-<BaseInput>
- │
- ▼
-<InputWrapper>
- │
- ▼
-<input>
-```
-
-MyInput.vue
+只需要命令式组件 API 时，也使用同一个宏。
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
+import { defineForwardRef } from "vue-refx";
 
-const ref = useForwardedRef<HTMLInputElement>();
+function focus() {}
+function blur() {}
+
+defineForwardRef(() => ({
+  focus,
+  blur,
+}));
 </script>
-
-<template>
-  <BaseInput ref="ref" />
-</template>
 ```
 
-BaseInput.vue
+这会编译成单个 `defineExpose()` 调用。在大多数组件里，
+`defineForwardRef()` 可以替代 `defineExpose()`，避免混用两个 API。
+
+## 转发模板 ref + 暴露方法
 
 ```vue
 <script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
+import { defineForwardRef } from "vue-refx";
 
-const ref = useForwardedRef<HTMLInputElement>();
-</script>
-
-<template>
-  <InputWrapper ref="ref" />
-</template>
-```
-
-InputWrapper.vue
-
-```vue
-<script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
-
-const ref = useForwardedRef<HTMLInputElement>();
-</script>
-
-<template>
-  <input ref="ref" />
-</template>
-```
-
-父组件仍然会收到最终的原生 input 元素。
-
-不再需要手动串联 `defineExpose()`。
-
----
-
-## 自定义命令式句柄
-
-有时你并不想暴露底层元素。
-
-这时可以暴露一个自定义 API。
-
-```vue
-<script setup lang="ts">
-import { useForwardedRef } from "vue-refx";
-
-const input = ref<HTMLInputElement>();
+const input = defineForwardRef<HTMLInputElement>("input", () => ({
+  focus,
+  blur,
+}));
 
 function focus() {
   input.value?.focus();
@@ -187,11 +98,6 @@ function focus() {
 function blur() {
   input.value?.blur();
 }
-
-useForwardedRef(() => ({
-  focus,
-  blur,
-}));
 </script>
 
 <template>
@@ -199,134 +105,40 @@ useForwardedRef(() => ({
 </template>
 ```
 
-父组件现在会收到：
+模板 ref 会转发给父组件，工厂返回的对象会合并进 `defineExpose()`。
+
+## 返回值
+
+赋值使用时，宏返回一个带类型的 Vue ref：
 
 ```ts
-input.value.focus();
-input.value.blur();
+const input = defineForwardRef<HTMLInputElement>("input");
+// Ref<HTMLInputElement | null>
 ```
 
-这在概念上类似于 React 的 `useImperativeHandle()`。
+忽略返回值时，不会生成本地变量。
 
----
+## 模板校验
 
-## 工作原理
+编译器会校验每一个转发的模板 ref 名称：
 
-vue-refx **只在编译期工作**。
+```ts
+defineForwardRef("input");
+```
 
-编译前：
+必须匹配：
 
 ```vue
-<MyInput ref="input" />
+<input ref="input" />
 ```
 
-转换后：
+否则编译失败：
 
-```vue
-<MyInput :__forwarded_ref__="(value) => (input = value)" />
+```text
+Cannot find template ref "input".
 ```
 
-在子组件内部：
+## 运行时
 
-```ts
-const ref = useForwardedRef();
-```
-
-会被编译为类似下面的代码：
-
-```ts
-const props = defineProps<{
-  __forwarded_ref__?: ForwardedRef<any>;
-}>();
-
-let value = null;
-
-const ref = customRef((track, trigger) => ({
-  get() {
-    track();
-    return value;
-  },
-  set(nextValue) {
-    value = nextValue;
-    trigger();
-    const target = props.__forwarded_ref__;
-
-    if (typeof target === "function") {
-      target(nextValue);
-    } else if (target) {
-      target.value = nextValue;
-    }
-  },
-}));
-```
-
-当传入工厂函数时：
-
-```ts
-useForwardedRef(() => ({
-  focus,
-  blur,
-}));
-```
-
-编译器会自动生成等价的 `defineExpose()`。
-
-所有这些都发生在编译阶段。
-
-运行时不会执行任何额外代码。
-
----
-
-## 对比
-
-| 功能                           | Vue `defineExpose()` | vue-refx |
-| ------------------------------ | -------------------- | -------- |
-| 暴露组件方法                   | ✅                   | ✅       |
-| 穿过多个组件转发 ref           | ❌                   | ✅       |
-| 零运行时                       | ✅                   | ✅       |
-| 需要修改运行时                 | ❌                   | ❌       |
-| React 风格的 forwarded ref API | ❌                   | ✅       |
-
----
-
-## 常见问题
-
-### 这会替代 Vue 的 `ref` 吗？
-
-不会。
-
-Vue 原生的 `ref` 行为不会改变。
-
-vue-refx 只是将已有的 ref 穿过组件继续向下转发。
-
----
-
-### 这会修改 Vue 运行时吗？
-
-不会。
-
-vue-refx 完全通过编译器转换实现。
-
----
-
-### 这可以和现有组件一起使用吗？
-
-可以。
-
-没有使用 `useForwardedRef()` 的组件会继续保持完全相同的行为。
-
----
-
-### 会有运行时成本吗？
-
-不会。
-
-`useForwardedRef()` 会在编译阶段被完全擦除。
-
-生成后的代码会使用 Vue 自带的 `customRef()`，让本地 `.value` ref 和父级转发 ref 保持同步。
-
----
-
-## 许可证
-
-MIT
+`defineForwardRef()` 在运行时包中只用于 TypeScript、IDE 和自动导入。
+所有宏调用都会在编译阶段被擦除。
