@@ -10,3 +10,7 @@ coverage
 *local*
 
 .eslintcache
+
+# vitepress
+docs/.vitepress/cache
+docs/.vitepress/dist

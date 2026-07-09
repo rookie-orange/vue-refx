@@ -41,6 +41,9 @@
   "scripts": {
     "build": "tsdown",
     "dev": "pnpm --dir playground dev",
+    "docs:build": "vitepress build docs",
+    "docs:dev": "vitepress dev docs",
+    "docs:preview": "vitepress preview docs",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",
@@ -73,6 +76,7 @@
     "tsdown": "^0.22.3",
     "typescript": "catalog:",
     "vite": "catalog:",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.10",
     "vue": "catalog:",
     "vue-tsc": "^3.3.7"
