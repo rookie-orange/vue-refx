@@ -68,6 +68,17 @@ export default defineConfig({
 });
 ```
 
+在 `tsconfig.json` 中启用 Volar 插件后，`defineForwardRef("...")` 里的模板
+ref 名称会获得补全提示：
+
+```jsonc
+{
+  "vueCompilerOptions": {
+    "plugins": ["vue-refx/volar"],
+  },
+}
+```
+
 ## 仅转发模板 ref
 
 子组件：

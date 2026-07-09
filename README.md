@@ -73,6 +73,17 @@ export default defineConfig({
 });
 ```
 
+Enable the Volar plugin in `tsconfig.json` to get template ref name completion
+inside `defineForwardRef("...")`:
+
+```jsonc
+{
+  "vueCompilerOptions": {
+    "plugins": ["vue-refx/volar"],
+  },
+}
+```
+
 ## Forward Only
 
 Child component:

@@ -23,6 +23,11 @@
       "import": "./dist/vite.js",
       "require": "./dist/vite.cjs"
     },
+    "./volar": {
+      "types": "./dist/volar.d.ts",
+      "import": "./dist/volar.js",
+      "require": "./dist/volar.cjs"
+    },
     "./runtime": {
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js",
@@ -44,7 +49,8 @@
     "release": "bumpp --git-check --no-push --execute \"pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm pack:check\" && npm --cache ./.npm-cache --registry https://registry.npmjs.org/ publish && git push --follow-tags",
     "release:version": "bumpp --git-check --no-push",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:playground": "vue-tsc --noEmit -p playground/tsconfig.json"
   },
   "dependencies": {
     "@babel/parser": "^7.26.3",
@@ -52,6 +58,7 @@
     "@babel/types": "^7.26.3",
     "@vue/compiler-dom": "^3.5.13",
     "@vue/compiler-sfc": "^3.5.13",
+    "@vue/language-core": "^3.3.7",
     "magic-string": "^0.30.17",
     "unplugin": "^2.1.2"
   },
@@ -66,7 +73,8 @@
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "^4.1.10",
-    "vue": "catalog:"
+    "vue": "catalog:",
+    "vue-tsc": "^3.3.7"
   },
   "peerDependencies": {
     "vue": "^3.5.0"

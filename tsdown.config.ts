@@ -1,11 +1,6 @@
-import { defineConfig } from "tsdown";
+import { defineConfig, type UserConfig } from "tsdown";
 
-export default defineConfig({
-  entry: {
-    vite: "packages/vite/src/index.ts",
-    runtime: "packages/runtime/src/index.ts",
-  },
-  clean: true,
+const shared: UserConfig = {
   dts: true,
   format: ["esm", "cjs"],
   sourcemap: true,
@@ -13,10 +8,13 @@ export default defineConfig({
   fixedExtension: false,
   hash: false,
   deps: {
-    neverBundle: ["vite", "vue"],
+    neverBundle: ["vite", "vue", "@vue/language-core"],
+    dts: {
+      neverBundle: ["vite", "vue", "@vue/language-core"],
+    },
   },
   outputOptions: {
-    exports: "named",
+    exports: "auto",
   },
   outExtensions({ format }) {
     return {
@@ -24,4 +22,28 @@ export default defineConfig({
       dts: format === "cjs" ? ".d.cts" : ".d.ts",
     };
   },
-});
+};
+
+export default defineConfig([
+  {
+    ...shared,
+    entry: {
+      vite: "packages/vite/src/index.ts",
+      runtime: "packages/runtime/src/index.ts",
+    },
+    clean: true,
+    outputOptions: {
+      exports: "named",
+    },
+  },
+  {
+    ...shared,
+    entry: {
+      volar: "packages/volar/src/index.ts",
+    },
+    clean: false,
+    outputOptions: {
+      exports: "auto",
+    },
+  },
+]);
