@@ -1,6 +1,6 @@
 {
   "name": "vue-refx",
-  "version": "0.3.0-beta.1",
+  "version": "0.3.0-beta.2",
   "description": "React-style forwarded refs for Vue, implemented as a compiler transform.",
   "license": "MIT",
   "files": [
