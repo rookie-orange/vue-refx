@@ -2,19 +2,7 @@
 
 ## 安装
 
-```bash
-pnpm add vue-refx
-```
-
-如果你使用 npm 或 yarn，也可以安装同一个包：
-
-```bash
-npm install vue-refx
-```
-
-```bash
-yarn add vue-refx
-```
+<PackageManagerTabs package-name="vue-refx" />
 
 ## 配置 Vite
 

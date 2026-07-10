@@ -6,7 +6,10 @@ export default defineConfig({
   lang: "zh-CN",
   cleanUrls: true,
   lastUpdated: true,
-  head: [["meta", { name: "theme-color", content: "#42b883" }]],
+  head: [
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/logo.svg" }],
+    ["meta", { name: "theme-color", content: "#42b883" }],
+  ],
   markdown: {
     lineNumbers: true,
   },
