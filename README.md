@@ -56,7 +56,7 @@ one unified API for:
 
 - forwarding a real template ref
 - exposing methods only
-- forwarding a template ref and exposing methods at the same time
+- forwarding an imperative handle built from a template ref
 
 ## Installation
 
@@ -139,24 +139,27 @@ defineForwardRef(() => ({
 
 This compiles to a single `defineExpose()` call.
 
-## Forward + Expose
+## Forward + Handle
 
 ```vue
 <script setup lang="ts">
 import { defineForwardRef } from "vue-refx";
 
-const input = defineForwardRef<HTMLInputElement>("input", () => ({
-  focus,
-  blur,
+interface InputHandle {
+  focus(): void;
+  input(value: string): void;
+}
+
+const input = defineForwardRef<HTMLInputElement, InputHandle>("input", (input) => ({
+  focus() {
+    input.value?.focus();
+  },
+  input(value) {
+    if (input.value) {
+      input.value.value = value;
+    }
+  },
 }));
-
-function focus() {
-  input.value?.focus();
-}
-
-function blur() {
-  input.value?.blur();
-}
 </script>
 
 <template>
@@ -164,8 +167,10 @@ function blur() {
 </template>
 ```
 
-The template ref is forwarded to the parent, and the factory object is merged
-into `defineExpose()`.
+When a factory is provided with a template ref name, the parent ref receives
+the factory handle. The macro return value is still the local
+`Ref<HTMLInputElement | null>`, so the component can build the handle from the
+inner ref.
 
 ## Forward Through Multiple Components
 

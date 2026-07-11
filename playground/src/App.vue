@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from "vue";
+import { onMounted, ref } from "vue";
 import AdvancedField from "./AdvancedField.vue";
 import MyInput from "./MyInput.vue";
 
@@ -14,15 +14,14 @@ interface AdvancedFieldHandle {
 
 const basicInput = ref<HTMLInputElement | null>(null);
 const advancedApi = ref<AdvancedFieldHandle | null>(null);
-const advancedInput = ref<HTMLInputElement | null>(null);
 const lastParentAction = ref("waiting for mount");
 const sampleIndex = ref(0);
 
-const samples = ["Forwarded ref is live", "Factory expose merged", "Vue runtime stays untouched"];
-
-function setAdvancedInput(element: HTMLInputElement | null) {
-  advancedInput.value = element;
-}
+const samples = [
+  "Forwarded handle is live",
+  "Factory handle extended",
+  "Vue runtime stays untouched",
+];
 
 function focusBasicInput() {
   basicInput.value?.focus();
@@ -98,7 +97,7 @@ onMounted(() => {
             <h2>Factory handle</h2>
           </div>
 
-          <AdvancedField ref="advancedApi" :__forwarded_ref__="setAdvancedInput" />
+          <AdvancedField ref="advancedApi" />
 
           <div class="actions" aria-label="Factory commands">
             <button type="button" @click="focusAdvanced">Focus</button>
@@ -111,12 +110,12 @@ onMounted(() => {
 
           <dl class="inspector">
             <div>
-              <dt>Forwarded DOM</dt>
-              <dd>{{ advancedInput?.tagName?.toLowerCase() || "none" }}</dd>
+              <dt>Forwarded handle</dt>
+              <dd>{{ advancedApi ? "ready" : "pending" }}</dd>
             </div>
             <div>
-              <dt>Exposed API</dt>
-              <dd>{{ advancedApi ? "ready" : "pending" }}</dd>
+              <dt>Value API</dt>
+              <dd>{{ advancedApi?.getValue() || "empty" }}</dd>
             </div>
           </dl>
         </section>

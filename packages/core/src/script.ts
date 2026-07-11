@@ -32,7 +32,9 @@ interface DefineForwardRefBinding {
   statementEnd: number;
   templateRef: string | null;
   bindingIdentifier: string | null;
-  typeSource: string | null;
+  targetTypeSource: string | null;
+  handleTypeSource: string | null;
+  factorySource: string | null;
   exposeProperties: string[];
   isVariableInitializer: boolean;
   isExpressionStatement: boolean;
@@ -82,7 +84,9 @@ export function transformScriptSetup(
 
   const forwardingBindings = bindings.filter((binding) => binding.templateRef);
   const localForwardingBindings = forwardingBindings.filter((binding) => binding.bindingIdentifier);
-  const exposedProperties = bindings.flatMap((binding) => binding.exposeProperties);
+  const exposedProperties = bindings
+    .filter((binding) => !binding.templateRef)
+    .flatMap((binding) => binding.exposeProperties);
   const defineProps = collectDefineProps(ast)[0] ?? null;
   const defineExpose = collectDefineExpose(ast)[0] ?? null;
   const propsIdentifier = defineProps?.propsIdentifier ?? choosePropsIdentifier(scope.bindings);
@@ -95,9 +99,9 @@ export function transformScriptSetup(
   removeDefineForwardRefImports(s, options.offset, scope);
 
   if (forwardingBindings.length > 0) {
-    const propShape = `{ ${FORWARDED_REF_PROP_NAME}?: ${buildRefType(forwardingBindings, refTypeIdentifier)} | ((value: any) => void) }`;
+    const propShape = `{ ${FORWARDED_REF_PROP_NAME}?: ${buildForwardedRefPropType(forwardingBindings, refTypeIdentifier)} | ((value: any) => void) }`;
 
-    if (localForwardingBindings.length > 0 && !scope.refTypeIdentifier) {
+    if (!scope.refTypeIdentifier) {
       s.prependLeft(
         options.offset,
         `\nimport type { Ref${refTypeIdentifier === "Ref" ? "" : ` as ${refTypeIdentifier}`} } from "vue"\n`,
@@ -138,7 +142,7 @@ export function transformScriptSetup(
   for (const binding of bindings) {
     if (binding.templateRef) {
       const source = buildForwardedRefSource(
-        binding.typeSource,
+        binding,
         propsIdentifier,
         customRefIdentifier,
         refTypeIdentifier,
@@ -155,6 +159,12 @@ export function transformScriptSetup(
           options.offset + assertPosition(binding.call.start),
           options.offset + assertPosition(binding.call.end),
           `defineExpose(${buildExposeObjectSource(exposedProperties)})`,
+        );
+      } else if (binding.factorySource && binding.bindingIdentifier) {
+        s.overwrite(
+          options.offset + binding.statementStart,
+          options.offset + binding.statementEnd,
+          `const ${binding.bindingIdentifier} = ${source}`,
         );
       } else if (binding.isExpressionStatement) {
         s.remove(options.offset + binding.statementStart, options.offset + binding.statementEnd);
@@ -190,7 +200,7 @@ export function transformScriptSetup(
   }
 
   return {
-    hasDefineForwardRef: true,
+    hasDefineForwardRef: forwardingBindings.length > 0,
     propsIdentifier: forwardingBindings.length > 0 ? propsIdentifier : null,
     templateRefs: forwardingBindings.map((binding) => ({
       name: binding.templateRef ?? "",
@@ -213,6 +223,7 @@ function collectDefineForwardRefBindings(
   scope: ScriptScope,
 ): DefineForwardRefBinding[] {
   const bindings: DefineForwardRefBinding[] = [];
+  const generatedBindingIdentifiers = new Set<string>();
 
   traverse(ast, {
     CallExpression(path) {
@@ -229,9 +240,18 @@ function collectDefineForwardRefBindings(
           : null;
       const expressionStatement = path.findParent((parent) => parent.isExpressionStatement());
       const statement = declarator?.parentPath?.node ?? expressionStatement?.node ?? node;
-      const bindingIdentifier = overload.templateRef
+      let bindingIdentifier = overload.templateRef
         ? getForwardedRefBindingIdentifier(declarator, Boolean(expressionStatement))
         : null;
+      const typeSources = getDefineForwardRefTypeSources(code, node);
+
+      if (overload.templateRef && !bindingIdentifier && overload.factorySource) {
+        bindingIdentifier = chooseGeneratedForwardedRefIdentifier(
+          scope.bindings,
+          generatedBindingIdentifiers,
+        );
+        generatedBindingIdentifiers.add(bindingIdentifier);
+      }
 
       bindings.push({
         call: node,
@@ -239,7 +259,9 @@ function collectDefineForwardRefBindings(
         statementEnd: getStatementEnd(code, assertPosition(statement.end)),
         templateRef: overload.templateRef,
         bindingIdentifier,
-        typeSource: getDefineForwardRefTypeSource(code, node),
+        targetTypeSource: typeSources.target,
+        handleTypeSource: typeSources.handle,
+        factorySource: overload.factorySource,
         exposeProperties: overload.exposeProperties,
         isVariableInitializer: Boolean(declarator),
         isExpressionStatement: Boolean(expressionStatement),
@@ -255,6 +277,7 @@ function parseDefineForwardRefOverload(
   call: CallExpression,
 ): {
   templateRef: string | null;
+  factorySource: string | null;
   exposeProperties: string[];
 } {
   const first = call.arguments[0];
@@ -264,15 +287,19 @@ function parseDefineForwardRefOverload(
   }
 
   if (first.type === "StringLiteral") {
+    const factorySource = getFactorySource(code, call.arguments[1]);
+
     return {
       templateRef: first.value,
-      exposeProperties: getFactoryExposeProperties(code, call.arguments[1]),
+      factorySource,
+      exposeProperties: [],
     };
   }
 
   if (first.type === "ArrowFunctionExpression" || first.type === "FunctionExpression") {
     return {
       templateRef: null,
+      factorySource: null,
       exposeProperties: getFactoryExposeProperties(code, first),
     };
   }
@@ -574,19 +601,54 @@ function removeDefineForwardRefImports(s: MagicString, offset: number, scope: Sc
   }
 }
 
-function getDefineForwardRefTypeSource(code: string, call: CallExpression): string | null {
+function getDefineForwardRefTypeSources(
+  code: string,
+  call: CallExpression,
+): {
+  target: string | null;
+  handle: string | null;
+} {
   const typeParameters = call.typeParameters as TSTypeParameterInstantiation | undefined;
 
-  if (!typeParameters || typeParameters.params.length === 0) {
+  if (!typeParameters) {
+    return {
+      target: null,
+      handle: null,
+    };
+  }
+
+  return {
+    target: getTypeParameterSource(code, typeParameters, 0),
+    handle: getTypeParameterSource(code, typeParameters, 1),
+  };
+}
+
+function getTypeParameterSource(
+  code: string,
+  typeParameters: TSTypeParameterInstantiation,
+  index: number,
+): string | null {
+  const parameter = typeParameters.params[index];
+
+  if (!parameter) {
     return null;
   }
 
-  return code
-    .slice(
-      assertPosition(typeParameters.params[0].start),
-      assertPosition(typeParameters.params[typeParameters.params.length - 1].end),
-    )
-    .trim();
+  return code.slice(assertPosition(parameter.start), assertPosition(parameter.end)).trim();
+}
+
+function getFactorySource(
+  code: string,
+  factory: CallExpression["arguments"][number] | undefined,
+): string | null {
+  if (
+    !factory ||
+    (factory.type !== "ArrowFunctionExpression" && factory.type !== "FunctionExpression")
+  ) {
+    return null;
+  }
+
+  return getNodeSource(code, factory).trim();
 }
 
 function getFactoryExposeProperties(
@@ -629,8 +691,13 @@ function getFactoryObjectExpression(
   return null;
 }
 
-function buildRefType(bindings: DefineForwardRefBinding[], refTypeIdentifier: string): string {
-  const typeSources = [...new Set(bindings.map((binding) => binding.typeSource).filter(Boolean))];
+function buildForwardedRefPropType(
+  bindings: DefineForwardRefBinding[],
+  refTypeIdentifier: string,
+): string {
+  const typeSources = [
+    ...new Set(bindings.map((binding) => getForwardedRefValueType(binding)).filter(Boolean)),
+  ];
 
   if (typeSources.length === 0) {
     return `${refTypeIdentifier}<any | null>`;
@@ -639,14 +706,23 @@ function buildRefType(bindings: DefineForwardRefBinding[], refTypeIdentifier: st
   return typeSources.map((type) => `${refTypeIdentifier}<${type} | null>`).join(" | ");
 }
 
+function getForwardedRefValueType(binding: DefineForwardRefBinding): string {
+  if (binding.factorySource) {
+    return binding.handleTypeSource ?? "any";
+  }
+
+  return binding.targetTypeSource ?? "any";
+}
+
 function buildForwardedRefSource(
-  typeSource: string | null,
+  binding: DefineForwardRefBinding,
   propsIdentifier: string,
   customRefIdentifier: string,
   refTypeIdentifier: string,
 ): string {
-  const valueType = `${typeSource ?? "any"} | null`;
+  const valueType = `${binding.targetTypeSource ?? "any"} | null`;
   const forwardedRefType = `${refTypeIdentifier}<${valueType}>`;
+  const nextTargetSource = buildNextForwardedRefValueSource(binding);
 
   return `${customRefIdentifier}<${valueType}>((track, trigger) => {
   let value = null as ${valueType}
@@ -660,15 +736,28 @@ function buildForwardedRefSource(
       value = nextValue
       trigger()
       const target = ${propsIdentifier}.${FORWARDED_REF_PROP_NAME}
+      const nextTarget = ${nextTargetSource}
 
       if (typeof target === "function") {
-        target(nextValue)
+        target(nextTarget)
       } else if (target) {
-        target.value = nextValue
+        target.value = nextTarget
       }
     }
   }
 }) as ${forwardedRefType}`;
+}
+
+function buildNextForwardedRefValueSource(binding: DefineForwardRefBinding): string {
+  if (!binding.factorySource) {
+    return "nextValue";
+  }
+
+  if (!binding.bindingIdentifier) {
+    throw new Error("defineForwardRef() with a factory requires a local ref binding.");
+  }
+
+  return `nextValue == null ? null : (${binding.factorySource})(${binding.bindingIdentifier})`;
 }
 
 function chooseCustomRefIdentifier(bindings: Set<string>): string {
@@ -714,6 +803,21 @@ function choosePropsIdentifier(bindings: Set<string>): string {
   while (bindings.has(candidate)) {
     candidate = `__forwardedRefProps${index}`;
     index += 1;
+  }
+
+  return candidate;
+}
+
+function chooseGeneratedForwardedRefIdentifier(
+  bindings: Set<string>,
+  generatedBindings: Set<string>,
+): string {
+  let index = 0;
+  let candidate = "__forwardedRef";
+
+  while (bindings.has(candidate) || generatedBindings.has(candidate)) {
+    index += 1;
+    candidate = `__forwardedRef${index}`;
   }
 
   return candidate;

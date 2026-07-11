@@ -6,6 +6,15 @@ const value = ref("Compile-time factory");
 const focused = ref(false);
 const lastAction = ref("mounted");
 
+interface AdvancedFieldHandle {
+  focus(): void;
+  blur(): void;
+  select(): void;
+  clear(): void;
+  fill(value: string): void;
+  getValue(): string;
+}
+
 function focus() {
   inputEl.value?.focus();
   lastAction.value = "focus()";
@@ -37,7 +46,7 @@ function getValue() {
   return value.value;
 }
 
-const inputEl = defineForwardRef<HTMLInputElement>("input", () => ({
+const inputEl = defineForwardRef<HTMLInputElement, AdvancedFieldHandle>("input", () => ({
   focus,
   blur,
   select,

@@ -51,7 +51,7 @@ export function scriptUsesDefineForwardRef(code: string): boolean {
       }
     },
     CallExpression(path) {
-      if (isDefineForwardRefCall(path, defineForwardRefLocals)) {
+      if (isDefineForwardRefCall(path, defineForwardRefLocals) && isForwardingOverload(path.node)) {
         found = true;
         path.stop();
       }
@@ -59,6 +59,10 @@ export function scriptUsesDefineForwardRef(code: string): boolean {
   });
 
   return found;
+}
+
+function isForwardingOverload(call: CallExpression): boolean {
+  return call.arguments[0]?.type === "StringLiteral";
 }
 
 export function isDefineForwardRefCall(

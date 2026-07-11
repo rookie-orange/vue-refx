@@ -24,5 +24,5 @@ features:
   - title: 类型友好
     details: 返回值是带类型的 Vue Ref，Volar 插件还能补全模板 ref 名称。
   - title: 一个 API
-    details: 同一个 defineForwardRef 覆盖转发、暴露方法以及二者组合。
+    details: 同一个 defineForwardRef 覆盖透明转发、defineExpose 替代写法和自定义 ref 句柄。
 ---

@@ -32,6 +32,7 @@ describe("vite plugin", () => {
     const child = path.join(dir, "MyInput.vue");
     const parent = path.join(dir, "Parent.vue");
     const plain = path.join(dir, "Plain.vue");
+    const exposeOnly = path.join(dir, "ExposeOnly.vue");
 
     await fs.writeFile(
       child,
@@ -44,14 +45,28 @@ defineForwardRef("input")
 `,
     );
     await fs.writeFile(plain, `<template><section /></template>`);
+    await fs.writeFile(
+      exposeOnly,
+      `<script setup lang="ts">
+import { defineForwardRef } from "vue-refx"
+
+defineForwardRef(() => ({
+  focus() {}
+}))
+</script>
+<template><input /></template>
+`,
+    );
 
     const parentCode = `<script setup lang="ts">
 import MyInput from "./MyInput.vue"
 import Plain from "./Plain.vue"
+import ExposeOnly from "./ExposeOnly.vue"
 </script>
 <template>
   <MyInput ref="input" />
   <Plain ref="plain" />
+  <ExposeOnly ref="api" />
   <div ref="el" />
 </template>
 `;
@@ -67,6 +82,7 @@ import Plain from "./Plain.vue"
     expect(result?.code).toContain(`MyInput :__forwarded_ref__="(value) => input = value"`);
     expect(result?.code).not.toContain(`MyInput ref="input"`);
     expect(result?.code).toContain(`<Plain ref="plain" />`);
+    expect(result?.code).toContain(`<ExposeOnly ref="api" />`);
     expect(result?.code).toContain(`<div ref="el" />`);
   });
 

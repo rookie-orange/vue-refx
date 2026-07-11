@@ -18,6 +18,7 @@ defineForwardRef("input")
 
     expect(result.hasChanged).toBe(true);
     expect(result.hasDefineForwardRef).toBe(true);
+    expect(result.code).toContain(`import type { Ref } from "vue"`);
     expect(result.code).toContain(
       `const props = defineProps<{ __forwarded_ref__?: Ref<any | null> | ((value: any) => void) }>()`,
     );
@@ -67,17 +68,25 @@ defineForwardRef(() => ({
     expect(result.code).not.toContain("__forwarded_ref__");
   });
 
-  it("forwards a template ref and exposes methods", () => {
+  it("forwards a factory handle built from a template ref", () => {
     const result = transformVueSfc(`
 <script setup lang="ts">
 import { defineForwardRef } from "vue-refx"
 
-function focus() {}
-function blur() {}
+interface InputHandle {
+  focus(): void
+  input(value: string): void
+}
 
-defineForwardRef("input", () => ({
-  focus,
-  blur,
+const input = defineForwardRef<HTMLInputElement, InputHandle>("input", (input) => ({
+  focus() {
+    input.value?.focus()
+  },
+  input(value: string) {
+    if (input.value) {
+      input.value.value = value
+    }
+  },
 }))
 </script>
 <template>
@@ -85,11 +94,43 @@ defineForwardRef("input", () => ({
 </template>
 `);
 
-    expect(result.code).toContain(`defineExpose({\n  focus,\n  blur\n})`);
     expect(result.code).toContain(
-      `const props = defineProps<{ __forwarded_ref__?: Ref<any | null> | ((value: any) => void) }>()`,
+      `const props = defineProps<{ __forwarded_ref__?: Ref<InputHandle | null> | ((value: any) => void) }>()`,
     );
-    expect(result.code).toContain(`:ref="props.__forwarded_ref__"`);
+    expect(result.code).toContain(`const input = customRef<HTMLInputElement | null>`);
+    expect(result.code).toContain(`const nextTarget = nextValue == null ? null : ((input) => ({`);
+    expect(result.code).toContain(`}))(input)`);
+    expect(result.code).toContain(`:ref="(value) => input = value"`);
+    expect(result.code).not.toContain("defineExpose");
+  });
+
+  it("creates a local template ref for statement factory handles", () => {
+    const result = transformVueSfc(`
+<script setup lang="ts">
+import { defineForwardRef } from "vue-refx"
+
+interface InputHandle {
+  focus(): void
+}
+
+defineForwardRef<HTMLInputElement, InputHandle>("input", (input) => ({
+  focus() {
+    input.value?.focus()
+  },
+}))
+</script>
+<template>
+  <input ref="input" />
+</template>
+`);
+
+    expect(result.code).toContain(`const __forwardedRef = customRef<HTMLInputElement | null>`);
+    expect(result.code).toContain(
+      `const props = defineProps<{ __forwarded_ref__?: Ref<InputHandle | null> | ((value: any) => void) }>()`,
+    );
+    expect(result.code).toContain(`}))(__forwardedRef)`);
+    expect(result.code).toContain(`:ref="(value) => __forwardedRef = value"`);
+    expect(result.code).not.toContain("defineExpose");
   });
 
   it("merges expose-only overload into an existing defineExpose object", () => {
@@ -148,6 +189,16 @@ defineForwardRef("input")
 
     expectTypeOf<Input>().toEqualTypeOf<Ref<HTMLInputElement | null>>();
     expectTypeOf<Input["value"]>().toEqualTypeOf<HTMLInputElement | null>();
+
+    defineForwardRef<HTMLInputElement>("input", (input) => {
+      expectTypeOf(input).toEqualTypeOf<Ref<HTMLInputElement | null>>();
+
+      return {
+        focus() {
+          input.value?.focus();
+        },
+      };
+    });
   });
 });
 
@@ -236,6 +287,27 @@ defineForwardRef("input")
         source: "./MyInput.vue",
       },
     ]);
+  });
+
+  it("does not mark expose-only calls as forwarded-ref components", () => {
+    const code = `
+<script setup lang="ts">
+import { defineForwardRef } from "vue-refx"
+
+defineForwardRef(() => ({
+  focus() {}
+}))
+</script>
+<template>
+  <input />
+</template>
+`;
+
+    const result = transformVueSfc(code);
+
+    expect(result.hasChanged).toBe(true);
+    expect(result.hasDefineForwardRef).toBe(false);
+    expect(analyzeVueSfc(code).hasDefineForwardRef).toBe(false);
   });
 
   it("keeps source maps disabled by default and available when requested", () => {

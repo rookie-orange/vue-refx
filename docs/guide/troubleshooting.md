@@ -36,7 +36,9 @@ import MyInput from "./MyInput.vue";
 </template>
 ```
 
-Vite 插件会分析父组件导入的 `.vue` 文件，只有当被导入组件使用了 `defineForwardRef()`，父组件上的 `ref` 才会被改写。
+Vite 插件会分析父组件导入的 `.vue` 文件，只有当被导入组件使用了
+`defineForwardRef("name")` 或 `defineForwardRef("name", factory)` 时，父组件上的 `ref`
+才会被改写。
 
 ## Vite 提示缺少 Vue 插件
 
@@ -58,8 +60,8 @@ export default defineConfig({
 ```jsonc
 {
   "vueCompilerOptions": {
-    "plugins": ["vue-refx/volar"]
-  }
+    "plugins": ["vue-refx/volar"],
+  },
 }
 ```
 

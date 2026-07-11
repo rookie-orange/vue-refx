@@ -15,7 +15,7 @@ export function defineForwardRef<T = any>(name: string): Ref<T | null>;
 export function defineForwardRef<T extends object>(factory: () => T): void;
 export function defineForwardRef<T = any, TExpose extends object = object>(
   name: string,
-  factory: () => TExpose,
+  factory: (ref: Ref<T | null>) => TExpose,
 ): Ref<T | null>;
 ```
 
@@ -62,23 +62,39 @@ defineForwardRef(() => ({
 
 ## `defineForwardRef(name, factory)`
 
-同时转发模板 ref 并暴露方法。
+基于模板 ref 生成父组件收到的命令式句柄。
 
 ```ts
-const input = defineForwardRef<HTMLInputElement>("input", () => ({
-  focus,
-  blur,
+interface InputHandle {
+  focus(): void;
+  input(value: string): void;
+}
+
+const input = defineForwardRef<HTMLInputElement, InputHandle>("input", (input) => ({
+  focus() {
+    input.value?.focus();
+  },
+  input(value) {
+    if (input.value) {
+      input.value.value = value;
+    }
+  },
 }));
 ```
 
-模板 ref 用于把底层元素传给父组件，工厂对象用于暴露额外方法。
+模板 ref 会先写入组件本地的 `Ref<T | null>`。当内部 ref 挂载时，父组件的 ref 会收到
+`factory(localRef)` 的返回值；当内部 ref 卸载时，父组件的 ref 会收到 `null`。
+
+第二个泛型参数 `TExpose` 可用于声明父组件 ref 收到的句柄类型。如果省略，内部转发 prop
+会退回到 `any`。
 
 ## 参数规则
 
 - `name` 必须是字符串字面量。
 - `name` 必须对应模板中的静态 `ref="name"`。
 - `factory` 必须是函数表达式或箭头函数。
-- `factory` 返回对象时，对象属性会被提取并合并到 `defineExpose()`。
+- `defineForwardRef(factory)` 会把工厂返回对象的属性合并到 `defineExpose()`。
+- `defineForwardRef(name, factory)` 会把工厂返回值写入父组件传入的转发 ref。
 
 ## 编译行为
 

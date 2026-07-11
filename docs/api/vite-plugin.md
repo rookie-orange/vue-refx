@@ -64,7 +64,9 @@ VueRefx({
 
 ## 父组件转换
 
-插件会分析父组件中导入的 `.vue` 组件。如果被导入组件使用了 `defineForwardRef()`，父组件上的 `ref` 会被改写成内部转发 prop。
+插件会分析父组件中导入的 `.vue` 组件。如果被导入组件使用了
+`defineForwardRef("name")` 或 `defineForwardRef("name", factory)`，父组件上的 `ref`
+会被改写成内部转发 prop。
 
 转换前：
 
@@ -78,8 +80,9 @@ VueRefx({
 <MyInput :__forwarded_ref__="(value) => (input = value)" />
 ```
 
-普通 DOM ref 和未使用 `defineForwardRef()` 的组件不会被改写。
+普通 DOM ref、未使用 `defineForwardRef()` 的组件，以及只使用 `defineForwardRef(() => ...)`
+的 expose-only 组件不会被改写。
 
 ## HMR
 
-开发服务器中，插件会缓存组件分析结果。当一个子组件新增或移除 `defineForwardRef()` 时，它会让相关父组件失效并重新转换，从而保持热更新行为一致。
+开发服务器中，插件会缓存组件分析结果。当一个子组件新增或移除模板 ref 转发时，它会让相关父组件失效并重新转换，从而保持热更新行为一致。

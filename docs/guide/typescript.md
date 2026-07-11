@@ -17,6 +17,27 @@ const input = defineForwardRef<HTMLInputElement>("input");
 
 `null` 表示模板 ref 尚未挂载，类型上与 Vue 原生模板 ref 保持一致。
 
+当同时传入模板 ref 名称和工厂函数时，第一个泛型是内部模板 ref 的类型，第二个泛型是父组件
+ref 收到的句柄类型。
+
+```ts
+interface InputHandle {
+  focus(): void;
+  input(value: string): void;
+}
+
+const input = defineForwardRef<HTMLInputElement, InputHandle>("input", (input) => ({
+  focus() {
+    input.value?.focus();
+  },
+  input(value) {
+    if (input.value) {
+      input.value.value = value;
+    }
+  },
+}));
+```
+
 ## 自动补全模板 ref 名称
 
 Volar 插件会收集模板中的静态 `ref` 名称，然后给 `defineForwardRef("...")` 的字符串参数提供补全锚点。
@@ -24,8 +45,8 @@ Volar 插件会收集模板中的静态 `ref` 名称，然后给 `defineForwardR
 ```jsonc
 {
   "vueCompilerOptions": {
-    "plugins": ["vue-refx/volar"]
-  }
+    "plugins": ["vue-refx/volar"],
+  },
 }
 ```
 

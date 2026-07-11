@@ -4,7 +4,7 @@
 
 内部 prop 名称是：
 
-```ts
+```text
 __forwarded_ref__
 ```
 
@@ -86,15 +86,16 @@ const input = customRef<HTMLInputElement | null>((track, trigger) => {
 
 ## 组件识别
 
-Vite 插件会读取父组件的导入声明，解析其中的 `.vue` 组件，并分析这些子组件是否使用了 `defineForwardRef()`。
+Vite 插件会读取父组件的导入声明，解析其中的 `.vue` 组件，并分析这些子组件是否使用了模板 ref 转发。
 
 只有确认使用了转发宏的组件才会触发父组件 ref 改写。这样可以避免误改普通组件或 DOM 元素。
 
-## 与 defineProps 和 defineExpose 合并
+## 与 defineProps 和 defineExpose
 
 如果组件已经声明了 `defineProps<T>()`，插件会把内部 prop 合并到现有类型中。
 
-如果组件已经声明了 `defineExpose({ ... })`，工厂函数返回的属性会追加到同一个对象里。
+`defineForwardRef(factory)` 仍然作为 `defineExpose()` 的替代写法。如果组件已经声明了
+`defineExpose({ ... })`，工厂函数返回对象的属性会追加到同一个对象里。
 
 ```ts
 defineExpose({
@@ -103,4 +104,7 @@ defineExpose({
 });
 ```
 
-这让 `defineForwardRef()` 可以和现有 Vue 宏并存，而不是要求组件迁移成另一套写法。
+`defineForwardRef(name, factory)` 的工厂函数不会合并进 `defineExpose()`。它会在本地模板 ref
+挂载时运行，并把返回的句柄写入父组件传入的转发 ref。
+
+这让纯命令式 expose 和跨组件 ref 转发保持两条清晰路径，同时仍然可以和现有 Vue 宏并存。

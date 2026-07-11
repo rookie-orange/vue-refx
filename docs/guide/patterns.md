@@ -56,32 +56,44 @@ defineForwardRef(() => ({
 
 这会编译成单个 `defineExpose()` 调用。
 
-## 转发 ref 并暴露方法
+## 转发 ref 并扩展句柄
 
-组件既可以把内部元素转发出去，也可以暴露一个更高层的命令式句柄。
+组件可以把下游组件或 DOM 的 ref 收进本地变量，再把一个扩展后的句柄转发给父组件。
 
 ```vue
 <script setup lang="ts">
 import { defineForwardRef } from "vue-refx";
 
-const input = defineForwardRef<HTMLInputElement>("input", () => ({
-  focus,
-  blur,
+interface BaseInputHandle {
+  focus(): void;
+  blur(): void;
+}
+
+interface InputHandle extends BaseInputHandle {
+  input(value: string): void;
+}
+
+const input = defineForwardRef<BaseInputHandle, InputHandle>("input", (input) => ({
+  focus() {
+    input.value?.focus();
+  },
+  blur() {
+    input.value?.blur();
+  },
+  input(value) {
+    input.value?.focus();
+    // 在这里更新本地状态，或继续委托给下游组件
+  },
 }));
-
-function focus() {
-  input.value?.focus();
-}
-
-function blur() {
-  input.value?.blur();
-}
 </script>
 
 <template>
-  <input ref="input" />
+  <BaseInput ref="input" />
 </template>
 ```
+
+父组件的 `ref` 会收到 `{ focus, blur, input }`，而组件内部的 `input` 仍然是
+`Ref<BaseInputHandle | null>`。
 
 ## 穿过多层组件
 
